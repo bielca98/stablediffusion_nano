@@ -1,12 +1,14 @@
 #!/bin/bash
 # ./train.sh  0,1,2
 
-export MODEL_NAME="bguisard/stable-diffusion-nano-2-1"
-#export MODEL_NAME="stabilityai/stable-diffusion-2-1"
-export OUTPUT_DIR="/projects/static2dynamic/Biel/stablediffusion_nano/test_output/nano_svdiff"
-export EXPERIMENT_NAME="nano_svdiff"
-export DATA_DIR="/projects/static2dynamic/Biel/stablediffusion_nano/data/data/train/DMSO"
-export PROMPT=""
+#export MODEL_NAME="bguisard/stable-diffusion-nano-2-1"
+export MODEL_NAME="stabilityai/stable-diffusion-2-1"
+export OUTPUT_DIR="/projects/static2dynamic/Biel/stablediffusion_nano/test_output/2.1_two_classes"
+export EXPERIMENT_NAME="2.1_two_classes"
+export DATA_DIR1="/projects/static2dynamic/Biel/stablediffusion_nano/data/data/train/DMSO"
+export DATA_DIR2="/projects/static2dynamic/Biel/stablediffusion_nano/data/data/train/latrunculin_B_high_conc"
+export PROMPT1="rkm"
+export PROMPT2="kle"
 
 # Check if GPU IDs are provided
 if [ "$#" -eq 0 ]; then
@@ -41,20 +43,21 @@ fi
 # Execute the command with the common options
 $CMD scripts/accelerate_train.py \
   --pretrained_model_name_or_path=$MODEL_NAME  \
-  --data_dir=$DATA_DIR\
-  --prompt=$PROMPT \
+  --data_dir $DATA_DIR1 $DATA_DIR2\
+  --prompt $PROMPT1 $PROMPT2 \
   --output_dir=$OUTPUT_DIR \
   --resolution=128 \
-  --train_batch_size=32 \
+  --train_batch_size=64 \
   --gradient_accumulation_steps=1 \
   --learning_rate=1e-3 \
   --lr_scheduler="cosine" \
   --lr_warmup_steps=0 \
   --report_to="wandb" \
-  --validation_prompt=$PROMPT \
+  --validation_prompt $PROMPT1 $PROMPT2 \
   --validation_epochs=1 \
   --num_validation_images=32 \
   --num_inference_steps=100 \
   --experiment_name=$EXPERIMENT_NAME \
   --num_train_epochs=200 \
-  --finetunning_method="svdiff"
+  --lora_rank=2 \
+  --finetunning_method="lora" 
