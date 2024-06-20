@@ -34,6 +34,8 @@ from accelerate.logging import get_logger
 
 from dataset_utils import DownStreamDataset, collate_fn
 
+from svdiff_pytorch.utils import load_unet_for_svdiff
+
 logger = get_logger(__name__)
 
 
@@ -321,6 +323,12 @@ def parse_args(input_args=None):
         ),
     )
     parser.add_argument(
+        "--lora_rank",
+        type=int,
+        default=None,
+        help=(" Rank of the LoRA matrices when method is set to `lora`. "),
+    )
+    parser.add_argument(
         "--noise_offset", type=float, default=0, help="The scale of noise offset."
     )
     parser.add_argument(
@@ -373,7 +381,12 @@ def load_unet(method, args):
             args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision
         )
     elif method == "svdiff":
-        pass
+        unet = load_unet_for_svdiff(
+            args.pretrained_model_name_or_path,
+            subfolder="unet",
+            revision=args.revision,
+            low_cpu_mem_usage=True,
+        )
 
     return unet
 
@@ -382,18 +395,39 @@ def prepare_trainable_parameters(method, unet, args):
     if method == "full":
         pass
     elif method == "lora":
-        rank = 2
         unet_lora_config = LoraConfig(
-            r=rank,  # args.rank,
-            lora_alpha=rank,  # args.rank,
+            r=args.lora_rank,
+            lora_alpha=args.lora_rank,
             init_lora_weights="gaussian",
             target_modules=["to_k", "to_q", "to_v", "to_out.0"],
         )
 
+        """ target_modules=[
+            "to_q",
+            "to_k",
+            "to_v",
+            "to_out.0",
+            "conv",
+            "conv_in",
+            "conv_out",
+            "conv_shortcut",
+            "conv1",
+            "conv2",
+            "proj",
+            "proj_in",
+            "proj_out",
+            "time_emb_proj",
+            "linear_1",
+            "linear_2",
+            "ff.net.2",
+        ],"""
+
         # Add adapter
         unet.add_adapter(unet_lora_config)
     elif method == "svdiff":
-        pass
+        for n, p in unet.named_parameters():
+            if "delta" in n:
+                p.requires_grad = True
 
     # Filter parameters that require gradients
     trainable_params = [p for p in unet.parameters() if p.requires_grad]
