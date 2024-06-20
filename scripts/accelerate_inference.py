@@ -1,11 +1,10 @@
 import torch
-import json
 from transformers import CLIPTextModel
 from diffusers import StableDiffusionPipeline, DDIMScheduler
 from accelerate import Accelerator
 from transformers import AutoTokenizer
 
-PRETRAINED_PATH = "stabilityai/stable-diffusion-2-1-base"
+PRETRAINED_PATH = "bguisard/stable-diffusion-nano-2-1"
 
 
 def load_model():
@@ -52,11 +51,11 @@ def generate_image(
         images = pipeline(
             prompt,
             num_inference_steps=num_inference_steps,
-            num_images_per_prompt=90,
+            num_images_per_prompt=4,
             generator=generator,
             guidance_scale=guidance_scale,
-            height=512,
-            width=512,
+            height=128,
+            width=128,
         ).images
 
     return images
@@ -73,8 +72,8 @@ def main():
     images = generate_image(pipeline, accelerator, prompt)
 
     # Save the image
-    # for i, image in enumerate(images):
-    #    image.save(f"outputs/delete/generated_image_{i}.png")
+    for i, image in enumerate(images):
+        image.save(f"outputs/delete/generated_image_{i}.png")
     print(f"Saved {len(images)} images.")
 
 
