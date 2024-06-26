@@ -10,8 +10,9 @@ import torch
 import torch.nn.functional as F
 import transformers
 import numpy as np
-from transformers import CLIPTextModel, AutoTokenizer
+from transformers import CLIPTextModel, AutoTokenizer, AutoConfig
 from peft import LoraConfig
+from PIL import Image
 
 import diffusers
 from diffusers.utils import is_wandb_available
@@ -35,6 +36,10 @@ from accelerate.logging import get_logger
 from dataset_utils import DownStreamDataset, collate_fn
 
 from svdiff_pytorch.utils import load_unet_for_svdiff
+
+
+if is_wandb_available():
+    import wandb
 
 logger = get_logger(__name__)
 
@@ -132,7 +137,7 @@ def parse_args(input_args=None):
         "--finetunning_method",
         type=str,
         default=None,
-        choices=["full", "lora", "svdiff"],
+        choices=["full", "lora", "svdiff", "from_scratch"],
         help=(
             "Finetunning method that will be used to adapt the model to the new dataset."
         ),
@@ -358,6 +363,11 @@ def parse_args(input_args=None):
         type=int,
         default=25,
     )
+    parser.add_argument(
+        "--upload_training_images",
+        action="store_true",
+        help="Whether or not to upload training images to the selected tracker.",
+    )
 
     if input_args is not None:
         args = parser.parse_args(input_args)
@@ -378,6 +388,12 @@ def load_unet(method, args):
         unet = UNet2DConditionModel.from_pretrained(
             args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision
         )
+    elif method == "from_scratch":
+        config = AutoConfig.from_pretrained(
+            args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision
+        )
+
+        unet = UNet2DConditionModel(config)
     elif method == "lora":
         unet = UNet2DConditionModel.from_pretrained(
             args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision
@@ -395,6 +411,9 @@ def load_unet(method, args):
 
 def prepare_trainable_parameters(method, unet, args):
     if method == "full":
+        for n, p in unet.named_parameters():
+            p.requires_grad = True
+    elif method == "from_scratch":
         for n, p in unet.named_parameters():
             p.requires_grad = True
     elif method == "lora":
@@ -438,10 +457,41 @@ def prepare_trainable_parameters(method, unet, args):
     return trainable_params
 
 
+def upload_training_files(data_dirs, accelerator):
+    for data_dir in data_dirs:
+        images = [
+            Image.open(os.path.join(data_dir, image))
+            for image in os.listdir(data_dir)
+            if image.endswith((".png", ".jpg", ".jpeg"))
+        ]
+
+        for tracker in accelerator.trackers:
+            if tracker.name == "tensorboard":
+                np_images = np.stack([np.asarray(img) for img in images])
+                tracker.writer.add_images(
+                    "training_images", np_images, dataformats="NHWC"
+                )
+            if tracker.name == "wandb":
+                tracker.log(
+                    {
+                        "training_images": [
+                            wandb.Image(
+                                image,
+                                caption=f"{i}",
+                            )
+                            for i, image in enumerate(images)
+                        ]
+                    }
+                )
+
+
 def main():
     args = parse_args()
 
     method = args.finetunning_method
+
+    if args.lora_rank is None and method == "lora":
+        raise ValueError("LoRA rank not defined")
 
     logging_dir = Path(args.output_dir, args.logging_dir)
     accelerator_project_config = ProjectConfiguration(
@@ -463,7 +513,6 @@ def main():
             raise ImportError(
                 "Make sure to install wandb if you want to use it for logging during training."
             )
-        import wandb
 
     # Make one log on every process with the configuration for debugging.
     logging.basicConfig(
@@ -686,7 +735,13 @@ def main():
         accelerator.init_trackers(
             "svdiff-pytorch",
             config=vars(args),
-            init_kwargs={"wandb": {"name": args.experiment_name}},
+            init_kwargs={
+                "wandb": {
+                    "name": args.experiment_name,
+                    "epochs": args.num_train_epochs,
+                    "batch_size": args.train_batch_size,
+                }
+            },
         )
 
     # cache keys to save
@@ -710,6 +765,10 @@ def main():
             )
 
             print(f"[*] Weights saved at {save_path}")
+
+    # Upload training images
+    if args.upload_training_images:
+        upload_training_files(args.data_dir, accelerator)
 
     # Train!
     total_batch_size = (
