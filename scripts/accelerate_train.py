@@ -375,7 +375,9 @@ def load_unet(method, args):
     unet = None
 
     if method == "full":
-        pass
+        unet = UNet2DConditionModel.from_pretrained(
+            args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision
+        )
     elif method == "lora":
         unet = UNet2DConditionModel.from_pretrained(
             args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision
@@ -393,7 +395,8 @@ def load_unet(method, args):
 
 def prepare_trainable_parameters(method, unet, args):
     if method == "full":
-        pass
+        for n, p in unet.named_parameters():
+            p.requires_grad = True
     elif method == "lora":
         unet_lora_config = LoraConfig(
             r=args.lora_rank,
