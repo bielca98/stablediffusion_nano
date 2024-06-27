@@ -1,12 +1,26 @@
 #!/bin/bash
-# ./train.sh  0,1,2
+# Usage:
+# ./train.sh gpu_list (like 0,1,2 or 0) "data_subfolder" "method" batch_size (like 128) model_index (0 for nano, 1 for stable-diffusion) "prompt"
+# ./train.sh 0 "train/DMSO" "attention" 64 0 ""
 
-export MODEL_NAME="bguisard/stable-diffusion-nano-2-1"
-#export MODEL_NAME="stabilityai/stable-diffusion-2-1"
-export OUTPUT_DIR="/projects/static2dynamic/Biel/stablediffusion_nano/test_output/nano_svdiff"
-export EXPERIMENT_NAME="nano_svdiff"
-export DATA_DIR="/projects/static2dynamic/Biel/stablediffusion_nano/data/data/train/DMSO"
-export PROMPT=""
+export DATA_SUBFOLDER=${2:-"train/DMSO"}
+export METHOD=${3:-"attention"}
+export BATCH_SIZE=${4:-64}
+
+MODEL_NAMES=("bguisard/stable-diffusion-nano-2-1" "stabilityai/stable-diffusion-2-1")
+MODEL_INDEX=${5:-0} 
+export MODEL_NAME=${MODEL_NAMES[$MODEL_INDEX]}
+
+export PROMPT=${6:-""}
+
+MODEL_TYPE=$(echo $MODEL_NAME | cut -d'/' -f2 | cut -d'-' -f3)
+export EXPERIMENT_NAME="${MODEL_TYPE}_${METHOD}_${DATA_SUBFOLDER}"
+
+BASE_DATA_DIR="/projects/static2dynamic/Biel/stablediffusion_nano/data/data/"
+export DATA_DIR="${BASE_DATA_DIR}${DATA_SUBFOLDER}"
+
+BASE_OUTPUT_DIR="/projects/static2dynamic/Biel/stablediffusion_nano/test_output/"
+export OUTPUT_DIR="${BASE_OUTPUT_DIR}${EXPERIMENT_NAME}"
 
 # Check if GPU IDs are provided
 if [ "$#" -eq 0 ]; then
@@ -45,7 +59,7 @@ $CMD scripts/accelerate_train.py \
   --prompt=$PROMPT \
   --output_dir=$OUTPUT_DIR \
   --resolution=128 \
-  --train_batch_size=32 \
+  --train_batch_size=$BATCH_SIZE \
   --gradient_accumulation_steps=1 \
   --learning_rate=1e-3 \
   --lr_scheduler="cosine" \
@@ -53,8 +67,8 @@ $CMD scripts/accelerate_train.py \
   --report_to="wandb" \
   --validation_prompt=$PROMPT \
   --validation_epochs=1 \
-  --num_validation_images=32 \
+  --num_validation_images=64 \
   --num_inference_steps=100 \
   --experiment_name=$EXPERIMENT_NAME \
   --num_train_epochs=200 \
-  --finetunning_method="svdiff"
+  --finetunning_method=$METHOD
