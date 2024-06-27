@@ -330,7 +330,7 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--lora_rank",
         type=int,
-        default=None,
+        default=2,
         help=(" Rank of the LoRA matrices when method is set to `lora`. "),
     )
     parser.add_argument(
@@ -497,9 +497,6 @@ def main():
     args = parse_args()
 
     method = args.finetunning_method
-
-    if args.lora_rank is None and method == "lora":
-        raise ValueError("LoRA rank not defined")
 
     logging_dir = Path(args.output_dir, args.logging_dir)
     accelerator_project_config = ProjectConfiguration(
