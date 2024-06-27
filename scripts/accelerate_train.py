@@ -581,8 +581,8 @@ def main():
     trainable_params = prepare_trainable_parameters(method, unet, args)
 
     # Print the number of trainable parameters
-    total_params = sum(p.numel() for p in trainable_params)
-    accelerator.print(f"Number of Trainable Parameters: {total_params * 1.e-6:.2f} M")
+    total_params = sum(p.numel() for p in trainable_params) * 1.0e-6
+    accelerator.print(f"Number of Trainable Parameters: {total_params:.2f} M")
 
     # Check that all trainable models are in full precision
     low_precision_error_string = (
@@ -738,8 +738,12 @@ def main():
             init_kwargs={
                 "wandb": {
                     "name": args.experiment_name,
-                    "epochs": args.num_train_epochs,
-                    "batch_size": args.train_batch_size,
+                    "config": {
+                        "epochs": args.num_train_epochs,
+                        "batch_size": args.train_batch_size,
+                        "trainable_params": total_params,
+                        "method": method,
+                    },
                 }
             },
         )
