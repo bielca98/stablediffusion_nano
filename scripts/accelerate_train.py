@@ -409,10 +409,37 @@ def load_unet(method, args):
     return unet
 
 
+def check_substring(n, target_modules):
+    for module in target_modules:
+        if module in n:
+            return True
+    return False
+
+
 def prepare_trainable_parameters(method, unet, args):
+
+    all_modules = [
+        "to_q",
+        "to_k",
+        "to_v",
+        "to_out.0",
+        "proj",
+        "proj_in",
+        "proj_out",
+        "time_emb_proj",
+        "linear_1",
+        "linear_2",
+        "ff.net.2",
+        "conv_in",
+        "conv_out",
+        "conv1",
+        "conv2",
+    ]
+
     if method == "full":
         for n, p in unet.named_parameters():
-            p.requires_grad = True
+            if check_substring(n, all_modules):
+                p.requires_grad = True
     elif method == "from_scratch":
         for n, p in unet.named_parameters():
             p.requires_grad = True
@@ -423,26 +450,6 @@ def prepare_trainable_parameters(method, unet, args):
             init_lora_weights="gaussian",
             target_modules=["to_k", "to_q", "to_v", "to_out.0"],
         )
-
-        """ target_modules=[
-            "to_q",
-            "to_k",
-            "to_v",
-            "to_out.0",
-            "conv",
-            "conv_in",
-            "conv_out",
-            "conv_shortcut",
-            "conv1",
-            "conv2",
-            "proj",
-            "proj_in",
-            "proj_out",
-            "time_emb_proj",
-            "linear_1",
-            "linear_2",
-            "ff.net.2",
-        ],"""
 
         # Add adapter
         unet.add_adapter(unet_lora_config)
