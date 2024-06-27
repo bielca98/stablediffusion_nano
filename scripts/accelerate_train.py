@@ -137,7 +137,7 @@ def parse_args(input_args=None):
         "--finetunning_method",
         type=str,
         default=None,
-        choices=["full", "lora", "svdiff", "from_scratch"],
+        choices=["full", "lora", "svdiff", "from_scratch", "attention"],
         help=(
             "Finetunning method that will be used to adapt the model to the new dataset."
         ),
@@ -384,7 +384,7 @@ def parse_args(input_args=None):
 def load_unet(method, args):
     unet = None
 
-    if method == "full":
+    if method == "full" or method == "attention":
         unet = UNet2DConditionModel.from_pretrained(
             args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision
         )
@@ -436,13 +436,14 @@ def prepare_trainable_parameters(method, unet, args):
         "conv2",
     ]
 
-    if method == "full":
+    if method == "full" or method == "from_scratch":
         for n, p in unet.named_parameters():
             if check_substring(n, all_modules):
                 p.requires_grad = True
-    elif method == "from_scratch":
+    elif method == "attention":
         for n, p in unet.named_parameters():
-            p.requires_grad = True
+            if check_substring(n, "to_k", "to_q", "to_v", "to_out.0"):
+                p.requires_grad = True
     elif method == "lora":
         unet_lora_config = LoraConfig(
             r=args.lora_rank,
