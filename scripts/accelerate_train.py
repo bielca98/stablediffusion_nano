@@ -442,7 +442,7 @@ def prepare_trainable_parameters(method, unet, args):
                 p.requires_grad = True
     elif method == "attention":
         for n, p in unet.named_parameters():
-            if check_substring(n, "to_k", "to_q", "to_v", "to_out.0"):
+            if check_substring(n, ["to_k", "to_q", "to_v", "to_out.0"]):
                 p.requires_grad = True
     elif method == "lora":
         unet_lora_config = LoraConfig(
