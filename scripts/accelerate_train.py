@@ -389,11 +389,11 @@ def load_unet(method, args):
             args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision
         )
     elif method == "from_scratch":
-        config = AutoConfig.from_pretrained(
+        config = UNet2DConditionModel.load_config(
             args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision
         )
 
-        unet = UNet2DConditionModel(config)
+        unet = UNet2DConditionModel.from_config(config)
     elif method == "lora":
         unet = UNet2DConditionModel.from_pretrained(
             args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision
@@ -764,14 +764,7 @@ def main():
             if save_path is None:
                 save_path = os.path.join(args.output_dir, f"checkpoint-{step}")
             os.makedirs(save_path, exist_ok=True)
-            state_dict = accelerator.unwrap_model(
-                unet, keep_fp32_wrapper=True
-            ).state_dict()
-            # state_dict = {k: v for k, v in unet_model.state_dict().items() if "delta" in k}
-            state_dict = {k: state_dict[k] for k in state_dict_keys}
-            save_file(
-                state_dict, os.path.join(save_path, "spectral_shifts.safetensors")
-            )
+            unet.save_pretrained(save_path)
 
             print(f"[*] Weights saved at {save_path}")
 
