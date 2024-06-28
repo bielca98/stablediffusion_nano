@@ -13,8 +13,11 @@ export MODEL_NAME=${MODEL_NAMES[$MODEL_INDEX]}
 
 export PROMPT=${6:-""}
 
+# To remove intermediate folders
+BASE_FOLDER_NAME=$(basename $DATA_SUBFOLDER)
+
 MODEL_TYPE=$(echo $MODEL_NAME | cut -d'/' -f2 | cut -d'-' -f3)
-export EXPERIMENT_NAME="${MODEL_TYPE}_${METHOD}_${DATA_SUBFOLDER}"
+export EXPERIMENT_NAME="${MODEL_TYPE}_${METHOD}_${BASE_FOLDER_NAME}"
 
 BASE_DATA_DIR="/projects/static2dynamic/Biel/stablediffusion_nano/data/data/"
 export DATA_DIR="${BASE_DATA_DIR}${DATA_SUBFOLDER}"
