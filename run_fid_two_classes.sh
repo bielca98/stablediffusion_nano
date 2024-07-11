@@ -2,9 +2,10 @@
 
 export MODEL_NAME="bguisard/stable-diffusion-nano-2-1"
 #export MODEL_NAME="stabilityai/stable-diffusion-2-1"
-export OUTPUT_DIR="/projects/static2dynamic/Biel/stablediffusion_nano/outputs/delete_from_scratch"
-export WEIGHTS_PATH="/projects/static2dynamic/Biel/stablediffusion_nano/test_output/nano_from_scratch_DMSO/checkpoint-250"
-export METHOD="from_scratch"
+export OUTPUT_DIR1="/projects/static2dynamic/Biel/stablediffusion_nano/outputs/delete1"
+export OUTPUT_DIR2="/projects/static2dynamic/Biel/stablediffusion_nano/outputs/delete2"
+export WEIGHTS_PATH="/projects/static2dynamic/Biel/stablediffusion_nano/test_output/2classes_nano_svdiff_DMSO_latrunculin_B_high_conc/checkpoint-400"
+export METHOD="svdiff"
 
 # Check if GPU IDs are provided
 if [ "$#" -eq 0 ]; then
@@ -40,6 +41,6 @@ fi
 $CMD scripts/fid_test.py \
   --pretrained_model_name_or_path=$MODEL_NAME \
   --weights_path=$WEIGHTS_PATH \
-  --output_dir=$OUTPUT_DIR \
+  --output_dir $OUTPUT_DIR1 $OUTPUT_DIR2 \
   --finetunning_method=$METHOD \
   --num_images_per_prompt=20 

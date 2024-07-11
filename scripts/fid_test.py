@@ -8,14 +8,19 @@ from diffusers import (
     AutoencoderKL,
     UNet2DConditionModel,
 )
-import pandas as pd
+from svdiff_pytorch.pipeline_stable_diffusion_custom import (
+    CustomStableDiffusionPipeline,
+)
 from accelerate import Accelerator
-from transformers import AutoTokenizer, AutoConfig
+from transformers import AutoTokenizer
 import os
-import shutil
 from PIL import Image
-from torchvision import models, transforms
+from torchvision import transforms
 from scipy.linalg import sqrtm
+from svdiff_pytorch.utils import load_unet_for_svdiff
+from svdiff_pytorch import UNet2DConditionModelForSVDiff
+from utils import load_unet_custom
+from peft import load_peft_weights, set_peft_model_state_dict
 
 
 def parse_args(input_args=None):
@@ -49,8 +54,18 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--output_dir",
         type=str,
+        nargs="+",
         default="output",
         help="The output directory where the generated images will be written.",
+    )
+    parser.add_argument(
+        "--finetunning_method",
+        type=str,
+        default=None,
+        choices=["full", "lora", "svdiff", "from_scratch", "attention"],
+        help=(
+            "Finetunning method that will be used to adapt the model to the new dataset."
+        ),
     )
 
     if input_args is not None:
@@ -61,36 +76,46 @@ def parse_args(input_args=None):
     return args
 
 
-def load_model(pretrained_path, weights_path, revision):
+def load_model(args):
 
     # Initialize the accelerator
     accelerator = Accelerator()
 
     # Load the tokenizer
     tokenizer = AutoTokenizer.from_pretrained(
-        pretrained_path,
+        args.pretrained_model_name_or_path,
         subfolder="tokenizer",
-        revision=revision,
+        revision=args.revision,
         use_fast=False,
     )
 
     # Load the text encoder
     text_encoder = CLIPTextModel.from_pretrained(
-        pretrained_path,
+        args.pretrained_model_name_or_path,
         subfolder="text_encoder",
-        revision=revision,
+        revision=args.revision,
     )
 
     # Load the scheduler
-    scheduler = DDIMScheduler.from_pretrained(pretrained_path, subfolder="scheduler")
+    scheduler = DDIMScheduler.from_pretrained(
+        args.pretrained_model_name_or_path, subfolder="scheduler"
+    )
 
     # Load the VAE
     vae = AutoencoderKL.from_pretrained(
-        pretrained_path, subfolder="vae", revision=revision
+        args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision
     )
 
     # Load the UNet configuration
-    unet = UNet2DConditionModel.from_pretrained(weights_path)
+    class_conditioning = len(args.output_dir) > 1
+    unet = load_unet_custom(
+        args.pretrained_model_name_or_path,
+        args.weights_path,
+        args.revision,
+        subfolder="unet",
+        method=args.finetunning_method,
+        class_conditioning=class_conditioning,
+    )
 
     # Move Unet, Vae and text_encoder to the correspondent device
     unet.to(accelerator.device)
@@ -103,14 +128,14 @@ def load_model(pretrained_path, weights_path, revision):
     text_encoder.eval()
 
     # Load the Stable Diffusion pipeline
-    pipeline = StableDiffusionPipeline.from_pretrained(
-        pretrained_path,
+    pipeline = CustomStableDiffusionPipeline.from_pretrained(
+        args.pretrained_model_name_or_path,
         tokenizer=tokenizer,
         scheduler=scheduler,
         text_encoder=text_encoder,
         unet=accelerator.unwrap_model(unet),
         vae=vae,
-        revision=revision,
+        revision=args.revision,
     )
 
     # Move the pipeline to the accelerator device(s)
@@ -124,6 +149,7 @@ def generate_image(
     accelerator,
     prompt,
     num_images_per_prompt,
+    class_label=None,
     num_inference_steps=100,
     seed=42,
 ):
@@ -136,6 +162,7 @@ def generate_image(
     with torch.autocast(device_type=device.type):
         images = pipeline(
             prompt,
+            class_label=class_label,
             num_inference_steps=num_inference_steps,
             num_images_per_prompt=num_images_per_prompt,
             generator=generator,
@@ -190,24 +217,34 @@ def get_activations(image_folder, model):
     return activations
 
 
+def save_images(images, output_dir):
+    # Create a outputs directory
+    os.makedirs(output_dir, exist_ok=True)
+
+    for i, img in enumerate(images):
+        img_path = os.path.join(output_dir, f"image_{i}.png")
+        img.save(img_path)
+
+
 def main():
     args = parse_args()
 
-    pipeline, accelerator = load_model(
-        args.pretrained_model_name_or_path, args.weights_path, args.revision
-    )
+    pipeline, accelerator = load_model(args)
 
-    images = generate_image(pipeline, accelerator, "", args.num_images_per_prompt)
-
-    # Create a outputs directory
-    os.makedirs(args.output_dir, exist_ok=True)
-
-    for i, img in enumerate(images):
-        img_path = os.path.join(args.output_dir, f"image_{i}.png")
-        img.save(img_path)
+    if len(args.output_dir) > 1:
+        for i in range(len(args.output_dir)):
+            print("Generating images with image label " + str(i))
+            images = generate_image(
+                pipeline, accelerator, "", args.num_images_per_prompt, class_label=i
+            )
+            save_images(images, args.output_dir[i])
+    else:
+        print("Generating images")
+        images = generate_image(pipeline, accelerator, "", args.num_images_per_prompt)
+        save_images(images, args.output_dir[0])
 
     # Load pre-trained InceptionV3 model + higher level layers
-    inception = models.inception_v3(pretrained=True, transform_input=False)
+    """inception = models.inception_v3(pretrained=True, transform_input=False)
     inception.fc = torch.nn.Identity()  # Remove the last layer
     inception.eval()
 
@@ -219,7 +256,7 @@ def main():
 
     # Calculate FID
     fid = calculate_fid(act1, act2)
-    print("FID score:", fid)
+    print("FID score:", fid)"""
 
 
 if __name__ == "__main__":

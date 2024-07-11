@@ -10,7 +10,7 @@ import torch
 import torch.nn.functional as F
 import transformers
 import numpy as np
-from transformers import CLIPTextModel, AutoTokenizer, AutoConfig
+from transformers import CLIPTextModel, AutoTokenizer
 from peft import LoraConfig
 from PIL import Image
 
@@ -20,23 +20,21 @@ from diffusers.utils.import_utils import is_xformers_available
 from diffusers import (
     AutoencoderKL,
     DDIMScheduler,
-    DiffusionPipeline,
-    StableDiffusionPipeline,
-    UNet2DConditionModel,
 )
 from diffusers.optimization import get_scheduler
 from diffusers.training_utils import compute_snr
-from safetensors.torch import save_file
 from huggingface_hub import create_repo, upload_folder
 
 from accelerate.utils import ProjectConfiguration, set_seed
 from accelerate import Accelerator
 from accelerate.logging import get_logger
 
-from dataset_utils import DownStreamDataset, collate_fn
+from utils import DownStreamDataset, collate_fn
 
-from svdiff_pytorch.utils import load_unet_for_svdiff
-
+from svdiff_pytorch.pipeline_stable_diffusion_custom import (
+    CustomStableDiffusionPipeline,
+)
+from utils import load_unet_custom, save_weights
 
 if is_wandb_available():
     import wandb
@@ -276,7 +274,7 @@ def parse_args(input_args=None):
         type=int,
         default=50,
         help=(
-            "Run dreambooth validation every X epochs. Dreambooth validation consists of running the prompt"
+            "Run FineTunning validation every X epochs. FineTunning validation consists of running the prompt"
             " `args.validation_prompt` multiple times: `args.num_validation_images`."
         ),
     )
@@ -381,34 +379,6 @@ def parse_args(input_args=None):
     return args
 
 
-def load_unet(method, args):
-    unet = None
-
-    if method == "full" or method == "attention":
-        unet = UNet2DConditionModel.from_pretrained(
-            args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision
-        )
-    elif method == "from_scratch":
-        config = UNet2DConditionModel.load_config(
-            args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision
-        )
-
-        unet = UNet2DConditionModel.from_config(config)
-    elif method == "lora":
-        unet = UNet2DConditionModel.from_pretrained(
-            args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision
-        )
-    elif method == "svdiff":
-        unet = load_unet_for_svdiff(
-            args.pretrained_model_name_or_path,
-            subfolder="unet",
-            revision=args.revision,
-            low_cpu_mem_usage=True,
-        )
-
-    return unet
-
-
 def check_substring(n, target_modules):
     for module in target_modules:
         if module in n:
@@ -416,53 +386,50 @@ def check_substring(n, target_modules):
     return False
 
 
+def unfreeze_parameters(unet, modules):
+    for n, p in unet.named_parameters():
+        if check_substring(n, modules):
+            p.requires_grad = True
+    return unet
+
+
 def prepare_trainable_parameters(method, unet, args):
 
-    all_modules = [
-        "to_q",
-        "to_k",
-        "to_v",
-        "to_out.0",
-        "proj",
-        "proj_in",
-        "proj_out",
-        "time_emb_proj",
-        "linear_1",
-        "linear_2",
-        "ff.net.2",
-        "conv_in",
-        "conv_out",
-        "conv1",
-        "conv2",
-    ]
-
     if method == "full" or method == "from_scratch":
-        for n, p in unet.named_parameters():
-            if check_substring(n, all_modules):
-                p.requires_grad = True
-    elif method == "attention":
-        for n, p in unet.named_parameters():
-            if check_substring(n, ["to_k", "to_q", "to_v", "to_out.0"]):
-                p.requires_grad = True
-    elif method == "lora":
-        unet_lora_config = LoraConfig(
-            r=args.lora_rank,
-            lora_alpha=args.lora_rank,
-            init_lora_weights="gaussian",
-            target_modules=["to_k", "to_q", "to_v", "to_out.0"],
+        unet = unfreeze_parameters(
+            unet,
+            [
+                "to_q",
+                "to_k",
+                "to_v",
+                "to_out.0",
+                "proj",
+                "proj_in",
+                "proj_out",
+                "time_emb_proj",
+                "linear_1",
+                "linear_2",
+                "ff.net.2",
+                "conv_in",
+                "conv_out",
+                "conv1",
+                "conv2",
+                "class_embedding",
+            ],
         )
-
-        # Add adapter
-        unet.add_adapter(unet_lora_config)
+    elif method == "attention":
+        unet = unfreeze_parameters(
+            unet, ["to_q", "to_k", "to_v", "to_out.0", "class_embedding"]
+        )
+    elif method == "lora":
+        unet = unfreeze_parameters(unet, ["lora", "class_embedding"])
     elif method == "svdiff":
-        for n, p in unet.named_parameters():
-            if "delta" in n:
-                p.requires_grad = True
+        unet = unfreeze_parameters(unet, ["delta", "class_embedding"])
 
     # Filter parameters that require gradients
     trainable_params = [p for p in unet.parameters() if p.requires_grad]
 
-    return trainable_params
+    return unet, trainable_params
 
 
 def upload_training_files(data_dirs, accelerator):
@@ -497,6 +464,7 @@ def main():
     args = parse_args()
 
     method = args.finetunning_method
+    class_conditioning = len(args.data_dir) > 1
 
     logging_dir = Path(args.output_dir, args.logging_dir)
     accelerator_project_config = ProjectConfiguration(
@@ -575,7 +543,23 @@ def main():
     )
 
     # Load UNET
-    unet = load_unet(method, args)
+    lora_config = None
+    if method == "lora":
+        lora_config = LoraConfig(
+            r=args.lora_rank,
+            lora_alpha=args.lora_rank,
+            init_lora_weights="gaussian",
+            target_modules=["to_k", "to_q", "to_v", "to_out.0"],
+        )
+
+    unet = load_unet_custom(
+        args.pretrained_model_name_or_path,
+        subfolder="unet",
+        revision=args.revision,
+        method=method,
+        lora_config=lora_config,
+        class_conditioning=class_conditioning,
+    )
 
     # freeze parameters of models to save more memory
     unet.requires_grad_(False)
@@ -583,7 +567,7 @@ def main():
     text_encoder.requires_grad_(False)
 
     # Prepare trainable parameters
-    trainable_params = prepare_trainable_parameters(method, unet, args)
+    unet, trainable_params = prepare_trainable_parameters(method, unet, args)
 
     # Print the number of trainable parameters
     total_params = sum(p.numel() for p in trainable_params) * 1.0e-6
@@ -753,21 +737,6 @@ def main():
             },
         )
 
-    # cache keys to save
-    state_dict_keys = [
-        k for k in accelerator.unwrap_model(unet).state_dict().keys() if "delta" in k
-    ]
-
-    def save_weights(step, save_path=None):
-        # Create the pipeline using using the trained modules and save it.
-        if accelerator.is_main_process:
-            if save_path is None:
-                save_path = os.path.join(args.output_dir, f"checkpoint-{step}")
-            os.makedirs(save_path, exist_ok=True)
-            unet.save_pretrained(save_path)
-
-            print(f"[*] Weights saved at {save_path}")
-
     # Upload training images
     if args.upload_training_images:
         upload_training_files(args.data_dir, accelerator)
@@ -872,6 +841,11 @@ def main():
                 # Get the text embedding for conditioning
                 encoder_hidden_states = text_encoder(batch["input_ids"])[0]
 
+                # Get the class labels for conditioning
+                class_labels = None
+                if len(args.data_dir) > 1:
+                    class_labels = batch["class_labels"]
+
                 # Get the target for loss depending on the prediction type
                 if args.prediction_type is not None:
                     # set prediction_type of scheduler if defined
@@ -890,7 +864,7 @@ def main():
 
                 # Predict the noise residual and compute loss
                 model_pred = unet(
-                    noisy_latents, timesteps, encoder_hidden_states
+                    noisy_latents, timesteps, encoder_hidden_states, class_labels
                 ).sample
 
                 if args.snr_gamma is None:
@@ -937,7 +911,14 @@ def main():
 
                 if global_step % args.checkpointing_steps == 0:
                     if accelerator.is_main_process:
-                        save_weights(global_step)
+                        save_weights(
+                            global_step,
+                            unet,
+                            accelerator,
+                            args.output_dir,
+                            method,
+                            class_conditioning,
+                        )
 
             logs = {
                 "loss": loss.detach().item(),
@@ -959,7 +940,7 @@ def main():
                     f" {args.validation_prompt}."
                 )
 
-                pipeline = StableDiffusionPipeline.from_pretrained(
+                pipeline = CustomStableDiffusionPipeline.from_pretrained(
                     args.pretrained_model_name_or_path,
                     torch_dtype=weight_dtype,
                     tokenizer=tokenizer,
@@ -985,6 +966,7 @@ def main():
                         with torch.autocast("cuda"):
                             images_batch = pipeline(
                                 prompt,
+                                class_label=i,
                                 num_inference_steps=args.num_inference_steps,
                                 generator=generator,
                                 num_images_per_prompt=args.num_validation_images,
@@ -1005,7 +987,7 @@ def main():
                                 "validation": [
                                     wandb.Image(
                                         image,
-                                        caption=f"{i}: {args.validation_prompt[i // args.num_validation_images]}",
+                                        caption=f"{i}: {i // args.num_validation_images}",
                                     )
                                     for i, image in enumerate(images)
                                 ]
@@ -1017,7 +999,15 @@ def main():
 
     accelerator.wait_for_everyone()
     # put the latest checkpoint to output-dir
-    save_weights(global_step, save_path=args.output_dir)
+    save_weights(
+        global_step,
+        unet,
+        accelerator,
+        args.output_dir,
+        method,
+        class_conditioning,
+        save_path=args.output_dir,
+    )
     if accelerator.is_main_process:
         if args.push_to_hub:
             save_model_card(
