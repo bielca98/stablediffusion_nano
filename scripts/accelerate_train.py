@@ -31,8 +31,8 @@ from accelerate.logging import get_logger
 
 from utils import DownStreamDataset, collate_fn
 
-from svdiff_pytorch.pipeline_stable_diffusion_custom import (
-    CustomStableDiffusionPipeline,
+from pipelines.pipeline_stable_diffusion_class_conditioned import (
+    ClassConditionedStableDiffusionPipeline,
 )
 from utils import load_unet_custom, save_weights
 
@@ -42,12 +42,11 @@ if is_wandb_available():
 logger = get_logger(__name__)
 
 
-def save_model_card(repo_id: str, base_model=str, prompt=str, repo_folder=None):
+def save_model_card(repo_id: str, base_model=str, repo_folder=None):
     yaml = f"""
 ---
 license: creativeml-openrail-m
 base_model: {base_model}
-instance_prompt: {prompt}
 tags:
 - stable-diffusion
 - stable-diffusion-diffusers
@@ -59,7 +58,7 @@ inference: true
     """
     model_card = f"""
 # SVDiff-pytorch - {repo_id}
-These are SVDiff weights for {base_model}. The weights were trained on {prompt}.
+These are SVDiff weights for {base_model}. 
 """
     with open(os.path.join(repo_folder, "README.md"), "w") as f:
         f.write(yaml + model_card)
@@ -171,6 +170,12 @@ def parse_args(input_args=None):
         help="Scale the learning rate by the number of GPUs, gradient accumulation steps, and batch size.",
     )
     parser.add_argument(
+        "--run_validation",
+        action="store_true",
+        default=True,
+        help="Run validation, consisting of generating images every validation_epochs number of epochs.",
+    )
+    parser.add_argument(
         "--train_batch_size",
         type=int,
         default=16,
@@ -219,14 +224,6 @@ def parse_args(input_args=None):
         help="A folder containing the training data of instance images.",
     )
     parser.add_argument(
-        "--prompt",
-        type=str,
-        nargs="+",
-        default=None,
-        required=True,
-        help="The prompt with identifier specifying the instance",
-    )
-    parser.add_argument(
         "--experiment_name",
         type=str,
         default="experiment",
@@ -249,13 +246,6 @@ def parse_args(input_args=None):
             " cropped. The images will be resized to the resolution first before cropping."
         ),
     )
-    parser.add_argument(
-        "--validation_prompt",
-        type=str,
-        nargs="+",
-        default=None,
-        help="A prompt that is used during validation to verify that the model is learning.",
-    )
     parser.add_argument("--num_train_epochs", type=int, default=1)
     parser.add_argument(
         "--lr_warmup_steps",
@@ -273,10 +263,7 @@ def parse_args(input_args=None):
         "--validation_epochs",
         type=int,
         default=50,
-        help=(
-            "Run FineTunning validation every X epochs. FineTunning validation consists of running the prompt"
-            " `args.validation_prompt` multiple times: `args.num_validation_images`."
-        ),
+        help=("Run FineTunning validation every X epochs."),
     )
     parser.add_argument(
         "--lr_power",
@@ -347,7 +334,7 @@ def parse_args(input_args=None):
         "--num_validation_images",
         type=int,
         default=4,
-        help="Number of images that should be generated during validation with `validation_prompt`.",
+        help="Number of images that should be generated during validation.",
     )
     parser.add_argument(
         "--snr_gamma",
@@ -517,20 +504,14 @@ def main():
                 token=args.hub_token,
             ).repo_id
 
-    # Load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(
-        args.pretrained_model_name_or_path,
-        subfolder="tokenizer",
-        revision=args.revision,
-        use_fast=False,
-    )
-
-    # Load text encoder
-    text_encoder = CLIPTextModel.from_pretrained(
+    # Load text encoder config
+    text_encoder_config = CLIPTextModel.config_class.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="text_encoder",
         revision=args.revision,
     )
+    encoder_max_position_embeddings = text_encoder_config.max_position_embeddings
+    encoder_hidden_size = text_encoder_config.hidden_size
 
     # Load scheduler
     noise_scheduler = DDIMScheduler.from_pretrained(
@@ -564,7 +545,6 @@ def main():
     # freeze parameters of models to save more memory
     unet.requires_grad_(False)
     vae.requires_grad_(False)
-    text_encoder.requires_grad_(False)
 
     # Prepare trainable parameters
     unet, trainable_params = prepare_trainable_parameters(method, unet, args)
@@ -584,12 +564,6 @@ def main():
             f"Unet loaded as datatype {accelerator.unwrap_model(unet).dtype}. {low_precision_error_string}"
         )
 
-    if accelerator.unwrap_model(text_encoder).dtype != torch.float32:
-        raise ValueError(
-            f"Text encoder loaded as datatype {accelerator.unwrap_model(text_encoder).dtype}."
-            f" {low_precision_error_string}"
-        )
-
     # For mixed precision training we cast the text_encoder and vae weights to half-precision
     # as these models are only used for inference, keeping weights in full precision is not required.
     weight_dtype = torch.float32
@@ -601,7 +575,6 @@ def main():
     # Move unet, vae and text_encoder to device and cast to weight_dtype
     unet.to(accelerator.device, dtype=weight_dtype)
     vae.to(accelerator.device, dtype=weight_dtype)
-    text_encoder.to(accelerator.device, dtype=weight_dtype)
 
     # Make sure the trainable params are in float32.
     if args.mixed_precision == "fp16":
@@ -671,8 +644,6 @@ def main():
     # Dataset and DataLoaders creation:
     train_dataset = DownStreamDataset(
         data_root=args.data_dir,
-        prompts=args.prompt,
-        tokenizer=tokenizer,
         size=args.resolution,
         center_crop=args.center_crop,
     )
@@ -838,8 +809,15 @@ def main():
                 # (this is the forward diffusion process)
                 noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
 
-                # Get the text embedding for conditioning
-                encoder_hidden_states = text_encoder(batch["input_ids"])[0]
+                # Initialize empty text embeddings
+                encoder_hidden_states = torch.zeros(
+                    [
+                        len(batch["class_labels"]),
+                        encoder_max_position_embeddings,
+                        encoder_hidden_size,
+                    ],
+                    dtype=weight_dtype,
+                ).to(accelerator.device)
 
                 # Get the class labels for conditioning
                 class_labels = None
@@ -931,21 +909,15 @@ def main():
                 break
 
         if accelerator.is_main_process:
-            if (
-                args.validation_prompt is not None
-                and epoch % args.validation_epochs == 0
-            ):
+            if args.run_validation and epoch % args.validation_epochs == 0:
                 logger.info(
-                    f"Running validation... \n Generating {args.num_validation_images} images with prompt:"
-                    f" {args.validation_prompt}."
+                    f"Running validation... \n Generating {args.num_validation_images} images for each class"
                 )
 
-                pipeline = CustomStableDiffusionPipeline.from_pretrained(
+                pipeline = ClassConditionedStableDiffusionPipeline.from_pretrained(
                     args.pretrained_model_name_or_path,
                     torch_dtype=weight_dtype,
-                    tokenizer=tokenizer,
                     scheduler=noise_scheduler,
-                    text_encoder=text_encoder,
                     unet=accelerator.unwrap_model(unet),
                     vae=vae,
                     revision=args.revision,
@@ -958,22 +930,32 @@ def main():
                 if args.seed is not None:
                     generator = generator.manual_seed(args.seed)
 
+                # Initialize empty text embeddings
+                encoder_hidden_states = torch.zeros(
+                    [
+                        args.num_validation_images,
+                        encoder_max_position_embeddings,
+                        encoder_hidden_size,
+                    ],
+                    dtype=weight_dtype,
+                ).to(accelerator.device)
+
                 images = []
 
-                for i, prompt in enumerate(args.validation_prompt):
-                    # Generate image using model and current prompt
+                for i, _ in enumerate(args.data_dir):
+                    # Generate images
                     with torch.no_grad():
                         with torch.autocast("cuda"):
                             images_batch = pipeline(
-                                prompt,
                                 class_label=i,
+                                encoder_hidden_states=encoder_hidden_states,
                                 num_inference_steps=args.num_inference_steps,
                                 generator=generator,
-                                num_images_per_prompt=args.num_validation_images,
+                                num_images=args.num_validation_images,
                                 height=args.resolution,
                                 width=args.resolution,
                             ).images
-                        images.extend(images_batch)
+                            images.extend(images_batch)
 
                 for tracker in accelerator.trackers:
                     if tracker.name == "tensorboard":
@@ -1013,7 +995,6 @@ def main():
             save_model_card(
                 repo_id,
                 base_model=args.pretrained_model_name_or_path,
-                prompt=args.instance_prompt,
                 repo_folder=args.output_dir,
             )
             upload_folder(

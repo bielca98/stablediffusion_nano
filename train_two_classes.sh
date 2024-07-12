@@ -1,7 +1,7 @@
 #!/bin/bash
 # Usage:
-# ./train_two_classes.sh gpu_list (like 0,1,2 or 0) "data_subfolder1" "data_subfolder2" "method" batch_size (like 128) model_index (0 for nano, 1 for stable-diffusion) "prompt1" "prompt2"
-# ./train_two_classes.sh 0 "train/DMSO" "train/latrunculin_B_high_conc" "attention" 64 0 "" ""
+# ./train_two_classes.sh gpu_list (like 0,1,2 or 0) "data_subfolder1" "data_subfolder2" "method" batch_size (like 128) model_index (0 for nano, 1 for stable-diffusion)
+# ./train_two_classes.sh 0 "train/DMSO" "train/latrunculin_B_high_conc" "attention" 64 0
 
 export DATA_SUBFOLDER1=${2:-"train/DMSO"}
 export DATA_SUBFOLDER2=${3:-"train/latrunculin_B_high_conc"}
@@ -11,9 +11,6 @@ export BATCH_SIZE=${5:-64}
 MODEL_NAMES=("bguisard/stable-diffusion-nano-2-1" "stabilityai/stable-diffusion-2-1")
 MODEL_INDEX=${6:-0} 
 export MODEL_NAME=${MODEL_NAMES[$MODEL_INDEX]}
-
-export PROMPT1=${7:-"\"\""}
-export PROMPT2=${8:-"\"\""}
 
 # To remove intermediate folders
 BASE_FOLDER_NAME1=$(basename $DATA_SUBFOLDER1)
@@ -62,7 +59,6 @@ fi
 # Execute the command with the common options
 $CMD scripts/accelerate_train.py \
   --pretrained_model_name_or_path=$MODEL_NAME  \
-  --prompt $PROMPT1 $PROMPT2 \
   --data_dir $DATA_DIR1 $DATA_DIR2 \
   --output_dir=$OUTPUT_DIR \
   --resolution=128 \
@@ -72,7 +68,6 @@ $CMD scripts/accelerate_train.py \
   --lr_scheduler="cosine" \
   --lr_warmup_steps=0 \
   --report_to="wandb" \
-  --validation_prompt $PROMPT1 $PROMPT2 \
   --validation_epochs=5 \
   --num_validation_images=32 \
   --checkpointing_steps=50 \

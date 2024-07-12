@@ -21,21 +21,18 @@ logger = get_logger(__name__)
 
 class DownStreamDataset(Dataset):
     """
-    A dataset to prepare the images with the prompts for fine-tuning the model.
-    It pre-processes the images and the tokenizes prompts.
+    A dataset to prepare the images for fine-tuning the model.
+    It pre-processes the images.
     """
 
     def __init__(
         self,
         data_root,
-        prompts,
-        tokenizer,
         size=512,
         center_crop=False,
     ):
         self.size = size
         self.center_crop = center_crop
-        self.tokenizer = tokenizer
 
         self.data_root = [Path(root) for root in data_root]
         for root in self.data_root:
@@ -44,7 +41,6 @@ class DownStreamDataset(Dataset):
 
         self.images_paths = [list(root.iterdir()) for root in self.data_root]
         self.num_images = [len(paths) for paths in self.images_paths]
-        self.prompts = prompts
         self._length = sum(self.num_images)
 
         self.image_transforms = transforms.Compose(
@@ -77,22 +73,13 @@ class DownStreamDataset(Dataset):
 
         if not image.mode == "RGB":
             image = image.convert("RGB")
-        # example["class_label"] = torch.tensor([i])
         example["class_label"] = i
         example["images"] = self.image_transforms(image)
-        example["prompt_ids"] = self.tokenizer(
-            self.prompts[i],
-            truncation=True,
-            padding="max_length",
-            max_length=self.tokenizer.model_max_length,
-            return_tensors="pt",
-        ).input_ids
 
         return example
 
 
 def collate_fn(examples):
-    input_ids = [example["prompt_ids"] for example in examples]
     pixel_values = [example["images"] for example in examples]
     class_labels = [example["class_label"] for example in examples]
 
@@ -101,10 +88,7 @@ def collate_fn(examples):
 
     class_labels = torch.tensor(class_labels).long()
 
-    input_ids = torch.cat(input_ids, dim=0)
-
     batch = {
-        "input_ids": input_ids,
         "pixel_values": pixel_values,
         "class_labels": class_labels,
     }
