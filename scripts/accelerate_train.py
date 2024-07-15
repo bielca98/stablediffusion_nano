@@ -565,7 +565,6 @@ def main():
                 "conv_out",
                 "conv1",
                 "conv2",
-                "class_embedding",
             ],
         )
 
