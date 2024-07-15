@@ -12,6 +12,10 @@ from pipelines.pipeline_stable_diffusion_ddim_inversion import (
 from accelerate import Accelerator
 import os
 from utils import load_unet_custom
+from diffusers.utils import is_wandb_available
+
+if is_wandb_available():
+    import wandb
 
 
 def parse_args(input_args=None):
@@ -68,6 +72,16 @@ def parse_args(input_args=None):
         help=(
             "Finetunning method that will be used to adapt the model to the new dataset."
         ),
+    )
+    parser.add_argument(
+        "--upload_images",
+        action="store_true",
+        help="Whether or not to upload images to wandb.",
+    )
+    parser.add_argument(
+        "--experiment_name",
+        type=str,
+        default="experiment",
     )
 
     if input_args is not None:
@@ -201,6 +215,16 @@ def main():
         encoder_hidden_size,
     ) = load_model(args)
 
+    if args.upload_images:
+        # Init wandb
+        wandb.init(
+            project="svdiff_img2img",
+            name=f"{args.experiment_name}",
+            config={
+                "method": args.finetunning_method,
+            },
+        )
+
     original_images = []
     translated_images = []
 
@@ -243,8 +267,29 @@ def main():
         original_images.extend(batch_images)
         translated_images.extend(translated_image_batch)
 
-    save_images(original_images, args.output_dir[0])
-    save_images(translated_images, args.output_dir[1])
+    if args.upload_images:
+        wandb.log(
+            {
+                "original_images": [
+                    wandb.Image(
+                        image,
+                        caption=f"{i}",
+                    )
+                    for i, image in enumerate(original_images)
+                ],
+                "translated_images": [
+                    wandb.Image(
+                        image,
+                        caption=f"{i}",
+                    )
+                    for i, image in enumerate(translated_images)
+                ],
+            }
+        )
+        wandb.finish()
+    else:
+        save_images(original_images, args.output_dir[0])
+        save_images(translated_images, args.output_dir[1])
 
 
 if __name__ == "__main__":

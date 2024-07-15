@@ -6,8 +6,11 @@ export DATA_DIR="/projects/static2dynamic/Biel/stablediffusion_nano/data/data/tr
 export CLASS_LABEL=0
 export OUTPUT_DIR1="/projects/static2dynamic/Biel/stablediffusion_nano/outputs/delete1"
 export OUTPUT_DIR2="/projects/static2dynamic/Biel/stablediffusion_nano/outputs/delete2"
-export WEIGHTS_PATH="/projects/static2dynamic/Biel/stablediffusion_nano/test_output/2classes_nano_attention_DMSO_latrunculin_B_high_conc/checkpoint-250"
+
+export WEIGHTS_PATH="/projects/static2dynamic/Biel/stablediffusion_nano/test_output/2classes_nano_attention_DMSO_latrunculin_B_high_conc/checkpoint-2000"
 export METHOD="attention"
+
+export EXPERIMENT_NAME=$(basename $(dirname $WEIGHTS_PATH))
 
 # Check if GPU IDs are provided
 if [ "$#" -eq 0 ]; then
@@ -45,6 +48,8 @@ $CMD scripts/img2img.py \
   --weights_path=$WEIGHTS_PATH \
   --output_dir $OUTPUT_DIR1 $OUTPUT_DIR2 \
   --data_dir=$DATA_DIR \
+  --experiment_name=$EXPERIMENT_NAME \
   --class_label=$CLASS_LABEL \
+  --upload_images \
   --num_images_per_class=50 \
   --finetunning_method=$METHOD
