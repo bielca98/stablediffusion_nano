@@ -95,6 +95,13 @@ def collate_fn(examples):
     return batch
 
 
+def check_substring(n, target_modules):
+    for module in target_modules:
+        if module in n:
+            return True
+    return False
+
+
 def save_weights(
     step, unet, accelerator, output_dir, method, class_conditioning, save_path=None
 ):
@@ -118,11 +125,33 @@ def save_weights(
                 state_dict_svdiff,
                 os.path.join(save_path, "spectral_shifts.safetensors"),
             )
+        elif method == "svdiff_attention":
+            weights_to_save = [
+                "to_q.delta",
+                "to_k.delta",
+                "to_v.delta",
+                "to_out.0.delta",
+            ]
+            svdiff_state_dict_keys = [
+                k
+                for k in accelerator.unwrap_model(unet).state_dict().keys()
+                if check_substring(k, weights_to_save)
+            ]
+            state_dict_svdiff = {k: state_dict[k] for k in svdiff_state_dict_keys}
+            save_file(
+                state_dict_svdiff,
+                os.path.join(save_path, "spectral_shifts.safetensors"),
+            )
         else:
             unet.save_pretrained(save_path)
 
         # Explicetely save class embedding weights
-        if class_conditioning and method in ["lora", "svdiff"]:
+        if class_conditioning and method in [
+            "lora",
+            "svdiff",
+            "svdiff_attention",
+            "lora_attention",
+        ]:
             class_embedding_state_dict_keys = [
                 k
                 for k in accelerator.unwrap_model(unet).state_dict().keys()
@@ -214,10 +243,10 @@ def load_unet_custom(
         initialize_class_embeddings = True
 
     # Instantiate model with empty weights (or random weights if from_scratch)
-    if method == "svdiff":
+    if "svdiff" in method:
         with init_empty_weights():
             model = UNet2DConditionModelForSVDiff.from_config(config)
-    elif method == "lora":
+    elif method == "lora" or method == "lora_attention":
         with init_empty_weights():
             model = UNet2DConditionModel.from_config(config)
 
@@ -243,7 +272,7 @@ def load_unet_custom(
     if method != "from_scratch" or weights_path is not None:
 
         # Load pre-trained weights
-        if method == "svdiff":
+        if "svdiff" in method:
             original_model = UNet2DConditionModel.from_pretrained(
                 pretrained_model_name_or_path, subfolder=subfolder, revision=revision
             )
@@ -254,7 +283,7 @@ def load_unet_custom(
                 if "delta" in n
             }
             state_dict.update(shift_weighgts)
-        elif method == "lora":
+        elif method == "lora" or method == "lora_attention":
             original_model = UNet2DConditionModel.from_pretrained(
                 pretrained_model_name_or_path, subfolder=subfolder, revision=revision
             )
@@ -300,7 +329,7 @@ def load_unet_custom(
                 )
 
         # Copy svdiff weights
-        if weights_path is not None and method == "svdiff":
+        if weights_path is not None and "svdiff" in method:
             model = load_safetensors_file(
                 weights_path,
                 "spectral_shifts.safetensors",
@@ -327,7 +356,12 @@ def load_unet_custom(
             set_module_tensor_to_device(
                 model, "class_embedding.weight", param_device, value=param
             )
-    elif class_conditioning and method in ["svdiff", "lora"]:
+    elif class_conditioning and method in [
+        "svdiff",
+        "svdiff_attention",
+        "lora",
+        "lora_attention",
+    ]:
         model = load_safetensors_file(
             weights_path,
             "class_embedding.safetensors",

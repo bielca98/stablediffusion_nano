@@ -34,7 +34,7 @@ from utils import DownStreamDataset, collate_fn
 from pipelines.pipeline_stable_diffusion_class_conditioned import (
     ClassConditionedStableDiffusionPipeline,
 )
-from utils import load_unet_custom, save_weights
+from utils import load_unet_custom, save_weights, check_substring
 
 if is_wandb_available():
     import wandb
@@ -134,7 +134,15 @@ def parse_args(input_args=None):
         "--finetunning_method",
         type=str,
         default=None,
-        choices=["full", "lora", "svdiff", "from_scratch", "attention"],
+        choices=[
+            "full",
+            "lora",
+            "svdiff",
+            "svdiff_attention",
+            "from_scratch",
+            "attention",
+            "lora_attention",
+        ],
         help=(
             "Finetunning method that will be used to adapt the model to the new dataset."
         ),
@@ -366,13 +374,6 @@ def parse_args(input_args=None):
     return args
 
 
-def check_substring(n, target_modules):
-    for module in target_modules:
-        if module in n:
-            return True
-    return False
-
-
 def unfreeze_parameters(unet, modules):
     for n, p in unet.named_parameters():
         if check_substring(n, modules):
@@ -408,10 +409,21 @@ def prepare_trainable_parameters(method, unet, args):
         unet = unfreeze_parameters(
             unet, ["to_q", "to_k", "to_v", "to_out.0", "class_embedding"]
         )
-    elif method == "lora":
+    elif method == "lora" or method == "lora_attention":
         unet = unfreeze_parameters(unet, ["lora", "class_embedding"])
     elif method == "svdiff":
         unet = unfreeze_parameters(unet, ["delta", "class_embedding"])
+    elif method == "svdiff_attention":
+        unet = unfreeze_parameters(
+            unet,
+            [
+                "to_q.delta",
+                "to_k.delta",
+                "to_v.delta",
+                "to_out.0.delta",
+                "class_embedding",
+            ],
+        )
 
     # Filter parameters that require gradients
     trainable_params = [p for p in unet.parameters() if p.requires_grad]
@@ -523,7 +535,7 @@ def main():
         args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision
     )
 
-    # Load UNET
+    # Initialize lora config
     lora_config = None
     if method == "lora":
         lora_config = LoraConfig(
@@ -532,7 +544,32 @@ def main():
             init_lora_weights="gaussian",
             target_modules=["to_k", "to_q", "to_v", "to_out.0"],
         )
+    elif method == "lora_attention":
+        lora_config = LoraConfig(
+            r=args.lora_rank,
+            lora_alpha=args.lora_rank,
+            init_lora_weights="gaussian",
+            target_modules=[
+                "to_q",
+                "to_k",
+                "to_v",
+                "to_out.0",
+                "proj",
+                "proj_in",
+                "proj_out",
+                "time_emb_proj",
+                "linear_1",
+                "linear_2",
+                "ff.net.2",
+                "conv_in",
+                "conv_out",
+                "conv1",
+                "conv2",
+                "class_embedding",
+            ],
+        )
 
+    # Load UNET
     unet = load_unet_custom(
         args.pretrained_model_name_or_path,
         subfolder="unet",
