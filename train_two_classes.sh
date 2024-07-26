@@ -1,15 +1,17 @@
 #!/bin/bash
 # Usage:
 # ./train_two_classes.sh gpu_list (like 0,1,2 or 0) "data_subfolder1" "data_subfolder2" "method" batch_size (like 128) model_index (0 for nano, 1 for stable-diffusion)
-# ./train_two_classes.sh 0 "train/DMSO" "train/latrunculin_B_high_conc" "attention" 64 0
+# ./train_two_classes.sh 0 "train/DMSO" "train/latrunculin_B_high_conc" "attention" 64 10 43 0
 
 export DATA_SUBFOLDER1=${2:-"train/DMSO"}
 export DATA_SUBFOLDER2=${3:-"train/latrunculin_B_high_conc"}
 export METHOD=${4:-"attention"}
 export BATCH_SIZE=${5:-64}
+export DATA_SAMPLES=${6:-10}
+export DATA_SAMPLING_SEED=${7:-43}
 
 MODEL_NAMES=("bguisard/stable-diffusion-nano-2-1" "stabilityai/stable-diffusion-2-1")
-MODEL_INDEX=${6:-0} 
+MODEL_INDEX=${8:-0} 
 export MODEL_NAME=${MODEL_NAMES[$MODEL_INDEX]}
 
 # To remove intermediate folders
@@ -68,10 +70,12 @@ $CMD scripts/accelerate_train.py \
   --lr_scheduler="cosine" \
   --lr_warmup_steps=0 \
   --report_to="wandb" \
-  --validation_epochs=5 \
+  --validation_epochs=50 \
   --num_validation_images=32 \
-  --checkpointing_steps=50 \
   --num_inference_steps=100 \
   --experiment_name=$EXPERIMENT_NAME \
-  --num_train_epochs=10 \
+  --validation_batch_size=200 \
+  --data_sampling_seed=$DATA_SAMPLING_SEED \
+  --data_samples=$DATA_SAMPLES \
+  --max_train_steps=10000 \
   --finetunning_method=$METHOD

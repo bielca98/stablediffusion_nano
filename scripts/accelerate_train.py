@@ -5,6 +5,11 @@ from pathlib import Path
 import logging
 from packaging import version
 from tqdm.auto import tqdm
+import torch_fidelity
+import shutil
+import tempfile
+
+from datetime import datetime
 
 import torch
 import torch.nn.functional as F
@@ -357,6 +362,24 @@ def parse_args(input_args=None):
         default=25,
     )
     parser.add_argument(
+        "--data_samples",
+        type=int,
+        default=10,
+        help="Number of samples that will be used from the indicated dataset.",
+    )
+    parser.add_argument(
+        "--data_sampling_seed",
+        type=int,
+        default=43,
+        help="Random seed that will be used to sample from the original dataset.",
+    )
+    parser.add_argument(
+        "--validation_batch_size",
+        type=int,
+        default=200,
+        help="Batch size using during validation to generate images.",
+    )
+    parser.add_argument(
         "--upload_training_images",
         action="store_true",
         help="Whether or not to upload training images to the selected tracker.",
@@ -457,6 +480,84 @@ def upload_training_files(data_dirs, accelerator):
                         ]
                     }
                 )
+
+
+def save_images(images, output_dir):
+
+    for i, img in enumerate(images):
+        img_path = os.path.join(output_dir, f"image_{i}.png")
+        img.save(img_path)
+
+
+def run_validation(
+    args, pipeline, accelerator, encoder_hidden_states, generator, epoch
+):
+    fid = []
+    upload_images = []
+
+    for i, _ in enumerate(args.data_dir):
+        # Generate images
+        with torch.no_grad():
+            with torch.autocast("cuda"):
+                print("Generating images with image label " + str(i))
+
+                num_class_images = len(os.listdir(args.data_dir[i]))
+                batch_size = args.validation_batch_size
+                num_batches = num_class_images // batch_size + (
+                    num_class_images % batch_size != 0
+                )
+
+                images = []
+                for j in range(num_batches):
+                    print("Generating images for batch " + str(j))
+                    images_batch = pipeline(
+                        class_label=i,
+                        encoder_hidden_states=encoder_hidden_states,
+                        num_inference_steps=args.num_inference_steps,
+                        generator=generator,
+                        num_images=batch_size,
+                        height=args.resolution,
+                        width=args.resolution,
+                    ).images
+
+                    images.extend(images_batch)
+
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    save_images(images, tmpdir)
+
+                    metrics_dict = torch_fidelity.calculate_metrics(
+                        input1=tmpdir,
+                        input2=args.data_dir[i],
+                        cuda=True,
+                        isc=False,
+                        fid=True,
+                        kid=False,
+                        prc=False,
+                    )
+                    fid.append(metrics_dict["frechet_inception_distance"])
+
+                upload_images.extend(images[: args.num_validation_images])
+
+    for tracker in accelerator.trackers:
+        if tracker.name == "tensorboard":
+            np_images = np.stack([np.asarray(img) for img in images])
+            tracker.writer.add_images(
+                "validation", np_images, epoch, dataformats="NHWC"
+            )
+        if tracker.name == "wandb":
+            tracker.log(
+                {
+                    "validation": [
+                        wandb.Image(
+                            image,
+                            caption=f"{i}: {i // args.num_validation_images}",
+                        )
+                        for i, image in enumerate(upload_images)
+                    ]
+                }
+            )
+            for i, value in enumerate(fid):
+                tracker.log({f"fid_{i}": value})
 
 
 def main():
@@ -682,6 +783,8 @@ def main():
         data_root=args.data_dir,
         size=args.resolution,
         center_crop=args.center_crop,
+        data_samples=args.data_samples,
+        data_sampling_seed=args.data_sampling_seed,
     )
 
     train_dataloader = torch.utils.data.DataLoader(
@@ -855,6 +958,15 @@ def main():
                     dtype=weight_dtype,
                 ).to(accelerator.device)
 
+                encoder_hidden_states_validation = torch.zeros(
+                    [
+                        args.validation_batch_size,
+                        encoder_max_position_embeddings,
+                        encoder_hidden_size,
+                    ],
+                    dtype=weight_dtype,
+                ).to(accelerator.device)
+
                 # Get the class labels for conditioning
                 class_labels = None
                 if len(args.data_dir) > 1:
@@ -976,41 +1088,14 @@ def main():
                     dtype=weight_dtype,
                 ).to(accelerator.device)
 
-                images = []
-
-                for i, _ in enumerate(args.data_dir):
-                    # Generate images
-                    with torch.no_grad():
-                        with torch.autocast("cuda"):
-                            images_batch = pipeline(
-                                class_label=i,
-                                encoder_hidden_states=encoder_hidden_states,
-                                num_inference_steps=args.num_inference_steps,
-                                generator=generator,
-                                num_images=args.num_validation_images,
-                                height=args.resolution,
-                                width=args.resolution,
-                            ).images
-                            images.extend(images_batch)
-
-                for tracker in accelerator.trackers:
-                    if tracker.name == "tensorboard":
-                        np_images = np.stack([np.asarray(img) for img in images])
-                        tracker.writer.add_images(
-                            "validation", np_images, epoch, dataformats="NHWC"
-                        )
-                    if tracker.name == "wandb":
-                        tracker.log(
-                            {
-                                "validation": [
-                                    wandb.Image(
-                                        image,
-                                        caption=f"{i}: {i // args.num_validation_images}",
-                                    )
-                                    for i, image in enumerate(images)
-                                ]
-                            }
-                        )
+                run_validation(
+                    args,
+                    pipeline,
+                    accelerator,
+                    encoder_hidden_states_validation,
+                    generator,
+                    epoch,
+                )
 
                 del pipeline
                 torch.cuda.empty_cache()

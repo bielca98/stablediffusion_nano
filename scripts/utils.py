@@ -5,6 +5,7 @@ import inspect
 from torchvision import transforms
 from PIL import Image
 import torch
+import random
 from diffusers import __version__
 from diffusers import UNet2DConditionModel
 from accelerate.logging import get_logger
@@ -30,16 +31,30 @@ class DownStreamDataset(Dataset):
         data_root,
         size=512,
         center_crop=False,
+        data_samples=10,
+        data_sampling_seed=43,
     ):
         self.size = size
         self.center_crop = center_crop
 
+        # Set the seed for reproducibility
+        random.seed(data_sampling_seed)
+
         self.data_root = [Path(root) for root in data_root]
+        self.images_paths = []
         for root in self.data_root:
             if not root.exists():
                 raise ValueError("Instance images root doesn't exists.")
 
-        self.images_paths = [list(root.iterdir()) for root in self.data_root]
+            # Get all image paths in the current root
+            all_images_paths = list(root.iterdir())
+
+            # Sample a specific number of images
+            sampled_images_paths = random.sample(all_images_paths, data_samples)
+
+            # Add the sampled paths to the main list as a new sublist
+            self.images_paths.append(sampled_images_paths)
+
         self.num_images = [len(paths) for paths in self.images_paths]
         self._length = sum(self.num_images)
 

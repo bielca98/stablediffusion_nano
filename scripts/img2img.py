@@ -68,7 +68,7 @@ def parse_args(input_args=None):
         "--finetunning_method",
         type=str,
         default=None,
-        choices=["full", "lora", "svdiff", "from_scratch", "attention"],
+        choices=["full", "lora", "svdiff", "from_scratch", "attention", "svdiff_attention", "lora_attention"],
         help=(
             "Finetunning method that will be used to adapt the model to the new dataset."
         ),

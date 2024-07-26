@@ -1,5 +1,7 @@
 import argparse
 import torch
+import shutil
+
 import numpy as np
 from transformers import CLIPTextModel
 from diffusers import (
@@ -15,6 +17,7 @@ from PIL import Image
 from torchvision import transforms
 from scipy.linalg import sqrtm
 from utils import load_unet_custom
+import torch_fidelity
 
 
 def parse_args(input_args=None):
@@ -34,10 +37,10 @@ def parse_args(input_args=None):
         help="Revision of pretrained model identifier from huggingface.co/models.",
     )
     parser.add_argument(
-        "--num_images_per_class",
+        "--num_images_per_iteration",
         type=int,
         default=20,
-        help="Number of images generated for validation.",
+        help="Number of images generated during each pipeline iteration.",
     )
     parser.add_argument(
         "--weights_path",
@@ -51,6 +54,13 @@ def parse_args(input_args=None):
         nargs="+",
         default="output",
         help="The output directory where the generated images will be written.",
+    )
+    parser.add_argument(
+        "--original_dir",
+        type=str,
+        nargs="+",
+        default="data/data/train/DMSO",
+        help="The images directory where the original images are.",
     )
     parser.add_argument(
         "--finetunning_method",
@@ -128,7 +138,7 @@ def load_model(args):
     # Prepare empty text encoder hidden states
     encoder_hidden_states = torch.zeros(
         [
-            args.num_images_per_class,
+            args.num_images_per_iteration,
             encoder_max_position_embeddings,
             encoder_hidden_size,
         ],
@@ -228,35 +238,47 @@ def main():
     if len(args.output_dir) > 1:
         for i in range(len(args.output_dir)):
             print("Generating images with image label " + str(i))
-            images = generate_image(
-                pipeline,
-                accelerator,
-                encoder_hidden_states,
-                args.num_images_per_class,
-                class_label=i,
+
+            # num_class_images = len(os.listdir(args.original_dir[i]))
+            num_class_images = 200
+            batch_size = args.num_images_per_iteration
+            num_batches = num_class_images // batch_size + (
+                num_class_images % batch_size != 0
             )
+
+            images = []
+            for j in range(num_batches):
+                batch_images = generate_image(
+                    pipeline,
+                    accelerator,
+                    encoder_hidden_states,
+                    batch_size,
+                    class_label=i,
+                    seed=j,
+                )
+                images.extend(batch_images)
             save_images(images, args.output_dir[i])
+
+            metrics_dict = torch_fidelity.calculate_metrics(
+                input1=args.output_dir[i],
+                input2=args.original_dir[i],
+                cuda=True,
+                isc=False,
+                fid=True,
+                kid=False,
+                prc=False,
+            )
+            print(metrics_dict)
+
+            # Remove the output directory if it exists
+            if os.path.exists(args.output_dir[i]):
+                shutil.rmtree(args.output_dir[i])
     else:
         print("Generating images")
         images = generate_image(
-            pipeline, accelerator, encoder_hidden_states, args.num_images_per_class
+            pipeline, accelerator, encoder_hidden_states, args.num_images_per_iteration
         )
         save_images(images, args.output_dir[0])
-
-    # Load pre-trained InceptionV3 model + higher level layers
-    """inception = models.inception_v3(pretrained=True, transform_input=False)
-    inception.fc = torch.nn.Identity()  # Remove the last layer
-    inception.eval()
-
-    # Load datasets
-    path2 = "/projects/static2dynamic/Biel/stablediffusion_nano/data/data/train/DMSO"
-    # Get activations
-    act1 = get_activations(args.output_dir, inception)
-    act2 = get_activations(path2, inception)
-
-    # Calculate FID
-    fid = calculate_fid(act1, act2)
-    print("FID score:", fid)"""
 
 
 if __name__ == "__main__":
