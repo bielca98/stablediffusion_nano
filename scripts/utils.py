@@ -231,6 +231,7 @@ def load_unet_custom(
     method=None,
     lora_config=None,
     class_conditioning=False,
+    is_local_checkpoint=False,
     **kwargs,
 ):
     user_agent = {
@@ -249,6 +250,7 @@ def load_unet_custom(
         revision=revision,
         subfolder=subfolder,
         user_agent=user_agent,
+        local_files_only=is_local_checkpoint,
     )
 
     # Add class embeddings

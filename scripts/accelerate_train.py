@@ -571,6 +571,9 @@ def main():
         project_dir=args.output_dir, logging_dir=logging_dir
     )
 
+    # Check if the given checkpoint is a local path
+    is_local_checkpoint = os.path.exists(args.pretrained_model_name_or_path)
+
     # Init accelerator
     accelerator = Accelerator(
         gradient_accumulation_steps=args.gradient_accumulation_steps,
@@ -622,22 +625,19 @@ def main():
         args.pretrained_model_name_or_path,
         subfolder="text_encoder",
         revision=args.revision,
+        local_files_only=is_local_checkpoint,
     )
     encoder_max_position_embeddings = text_encoder_config.max_position_embeddings
     encoder_hidden_size = text_encoder_config.hidden_size
 
     # Load scheduler
-    noise_scheduler = DDIMScheduler.from_pretrained(
-        args.pretrained_model_name_or_path, subfolder="scheduler"
-    )
-
-    # Load VAE
     vae = AutoencoderKL.from_pretrained(
-        args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision
+        args.pretrained_model_name_or_path,
+        subfolder="vae",
+        revision=args.revision,
+        local_files_only=is_local_checkpoint,
     )
 
-    # Initialize lora config
-    lora_config = None
     if method == "lora":
         lora_config = LoraConfig(
             r=args.lora_rank,
@@ -677,6 +677,7 @@ def main():
         method=method,
         lora_config=lora_config,
         class_conditioning=class_conditioning,
+        is_local_checkpoint=is_local_checkpoint,
     )
 
     # freeze parameters of models to save more memory
