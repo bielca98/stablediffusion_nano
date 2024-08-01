@@ -384,6 +384,17 @@ def parse_args(input_args=None):
         action="store_true",
         help="Whether or not to upload training images to the selected tracker.",
     )
+    parser.add_argument(
+        "--use_local_checkpoints",
+        action="store_true",
+        help="Whether to use local checkpoints or download them from huggingface.",
+    )
+    parser.add_argument(
+        "--inception_weights_path",
+        type=str,
+        default=None,
+        help="Path that will be used to load the weights of the inception model during the fid computation. If use_local_checkpoints is not used, then it will download it from the hub",
+    )
 
     if input_args is not None:
         args = parser.parse_args(input_args)
@@ -525,6 +536,10 @@ def run_validation(
                 with tempfile.TemporaryDirectory() as tmpdir:
                     save_images(images, tmpdir)
 
+                    feature_extractor_weights_path = None
+                    if args.use_local_checkpoints:
+                        feature_extractor_weights_path = args.inception_weights_path
+
                     metrics_dict = torch_fidelity.calculate_metrics(
                         input1=tmpdir,
                         input2=args.data_dir[i],
@@ -533,6 +548,7 @@ def run_validation(
                         fid=True,
                         kid=False,
                         prc=False,
+                        feature_extractor_weights_path=feature_extractor_weights_path,
                     )
                     fid.append(metrics_dict["frechet_inception_distance"])
 
@@ -570,9 +586,6 @@ def main():
     accelerator_project_config = ProjectConfiguration(
         project_dir=args.output_dir, logging_dir=logging_dir
     )
-
-    # Check if the given checkpoint is a local path
-    is_local_checkpoint = os.path.exists(args.pretrained_model_name_or_path)
 
     # Init accelerator
     accelerator = Accelerator(
@@ -625,17 +638,22 @@ def main():
         args.pretrained_model_name_or_path,
         subfolder="text_encoder",
         revision=args.revision,
-        local_files_only=is_local_checkpoint,
+        local_files_only=args.use_local_checkpoints,
     )
     encoder_max_position_embeddings = text_encoder_config.max_position_embeddings
     encoder_hidden_size = text_encoder_config.hidden_size
 
     # Load scheduler
+    noise_scheduler = DDIMScheduler.from_pretrained(
+        args.pretrained_model_name_or_path, subfolder="scheduler"
+    )
+
+    # Load VAE
     vae = AutoencoderKL.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="vae",
         revision=args.revision,
-        local_files_only=is_local_checkpoint,
+        local_files_only=args.use_local_checkpoints,
     )
 
     if method == "lora":
@@ -668,6 +686,8 @@ def main():
                 "conv2",
             ],
         )
+    else:
+        lora_config = None
 
     # Load UNET
     unet = load_unet_custom(
@@ -677,7 +697,7 @@ def main():
         method=method,
         lora_config=lora_config,
         class_conditioning=class_conditioning,
-        is_local_checkpoint=is_local_checkpoint,
+        is_local_checkpoint=args.use_local_checkpoints,
     )
 
     # freeze parameters of models to save more memory
