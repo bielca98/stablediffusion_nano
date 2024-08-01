@@ -1120,6 +1120,7 @@ def main():
 
                 del pipeline
                 torch.cuda.empty_cache()
+        accelerator.wait_for_everyone()
 
     accelerator.wait_for_everyone()
     # put the latest checkpoint to output-dir
