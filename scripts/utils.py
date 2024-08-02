@@ -158,7 +158,7 @@ def save_weights(
                 os.path.join(save_path, "spectral_shifts.safetensors"),
             )
         else:
-            unet.save_pretrained(save_path)
+            accelerator.unwrap_model(unet).save_pretrained(save_path)
 
         # Explicetely save class embedding weights
         if class_conditioning and method in [
