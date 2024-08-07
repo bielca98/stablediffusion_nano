@@ -907,8 +907,10 @@ def main():
         )
 
     # Upload training images
-    if args.upload_training_images:
-        upload_training_files(args.data_dir, accelerator)
+    data_dirs = args.data_dir
+    if not isinstance(args.data_dir, list):
+        data_dirs = [args.data_dir]
+    upload_training_files(data_dirs, accelerator)
 
     # Train!
     total_batch_size = (
