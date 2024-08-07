@@ -493,34 +493,61 @@ def upload_training_files(data_dirs, accelerator):
                 )
 
 
-def save_images(images, output_dir):
-
+def save_images(images, output_dir, start_index):
+    """Save images to the specified directory with a global index."""
     for i, img in enumerate(images):
-        img_path = os.path.join(output_dir, f"image_{i}.png")
+        img_path = os.path.join(output_dir, f"image_{start_index + i}.png")
         img.save(img_path)
 
 
 def run_validation(
     args, pipeline, accelerator, encoder_hidden_states, generator, epoch
 ):
-    fid = []
+    fid_scores = []
     upload_images = []
 
-    for i, _ in enumerate(args.data_dir):
+    # Get the number of processes and the current process index
+    num_processes = accelerator.num_processes
+    process_index = accelerator.process_index
+
+    # Each process uses a unique random seed
+    process_seed = args.seed + process_index if args.seed is not None else None
+    if process_seed is not None:
+        generator.manual_seed(process_seed)
+
+    # Main process creates output directories for each class
+    if accelerator.is_main_process:
+        for i in range(len(args.data_dir)):
+            class_output_dir = os.path.join(
+                args.output_dir, f"output_images_epoch_{epoch}_class_{i}"
+            )
+            os.makedirs(class_output_dir, exist_ok=True)
+
+    # Ensure all processes have created the directories
+    accelerator.wait_for_everyone()
+
+    for i, data_dir in enumerate(args.data_dir):
+        # Directory for the class
+        class_output_dir = os.path.join(
+            args.output_dir, f"output_images_epoch_{epoch}_class_{i}"
+        )
+
+        # Determine the number of images to generate per process for each class
+        total_class_images = len(os.listdir(data_dir))
+        images_per_process = total_class_images // num_processes
+        start_index = process_index * images_per_process
+
         # Generate images
         with torch.no_grad():
             with torch.autocast("cuda"):
-                print("Generating images with image label " + str(i))
 
-                num_class_images = len(os.listdir(args.data_dir[i]))
                 batch_size = args.validation_batch_size
-                num_batches = num_class_images // batch_size + (
-                    num_class_images % batch_size != 0
+                num_batches = images_per_process // batch_size + (
+                    images_per_process % batch_size != 0
                 )
 
                 images = []
                 for j in range(num_batches):
-                    print("Generating images for batch " + str(j))
                     images_batch = pipeline(
                         class_label=i,
                         encoder_hidden_states=encoder_hidden_states,
@@ -533,47 +560,58 @@ def run_validation(
 
                     images.extend(images_batch)
 
-                with tempfile.TemporaryDirectory() as tmpdir:
-                    save_images(images, tmpdir)
-
-                    feature_extractor_weights_path = None
-                    if args.use_local_checkpoints:
-                        feature_extractor_weights_path = args.inception_weights_path
-
-                    metrics_dict = torch_fidelity.calculate_metrics(
-                        input1=tmpdir,
-                        input2=args.data_dir[i],
-                        cuda=True,
-                        isc=False,
-                        fid=True,
-                        kid=False,
-                        prc=False,
-                        feature_extractor_weights_path=feature_extractor_weights_path,
-                    )
-                    fid.append(metrics_dict["frechet_inception_distance"])
+                # Save images to the shared directory
+                save_images(images, class_output_dir, start_index)
 
                 upload_images.extend(images[: args.num_validation_images])
 
-    for tracker in accelerator.trackers:
-        if tracker.name == "tensorboard":
-            np_images = np.stack([np.asarray(img) for img in images])
-            tracker.writer.add_images(
-                "validation", np_images, epoch, dataformats="NHWC"
+    # Synchronize before FID calculation
+    accelerator.wait_for_everyone()
+
+    # Main process computes FID score using the entire set of generated images
+    if accelerator.is_main_process:
+        feature_extractor_weights_path = None
+        if args.use_local_checkpoints:
+            feature_extractor_weights_path = args.inception_weights_path
+
+        # Calculate FID score for each class
+        for i, data_dir in enumerate(args.data_dir):
+            class_output_dir = os.path.join(
+                args.output_dir, f"output_images_epoch_{epoch}_class_{i}"
             )
-        if tracker.name == "wandb":
-            tracker.log(
-                {
-                    "validation": [
-                        wandb.Image(
-                            image,
-                            caption=f"{i}: {i // args.num_validation_images}",
-                        )
-                        for i, image in enumerate(upload_images)
-                    ]
-                }
+            metrics_dict = torch_fidelity.calculate_metrics(
+                input1=class_output_dir,
+                input2=data_dir,
+                cuda=True,
+                isc=False,
+                fid=True,
+                kid=False,
+                prc=False,
+                feature_extractor_weights_path=feature_extractor_weights_path,
             )
-            for i, value in enumerate(fid):
-                tracker.log({f"fid_{i}": value})
+            class_fid = metrics_dict["frechet_inception_distance"]
+            fid_scores.append(class_fid)
+
+        for tracker in accelerator.trackers:
+            if tracker.name == "tensorboard":
+                np_images = np.stack([np.asarray(img) for img in images])
+                tracker.writer.add_images(
+                    "validation", np_images, epoch, dataformats="NHWC"
+                )
+            if tracker.name == "wandb":
+                tracker.log(
+                    {
+                        "validation": [
+                            wandb.Image(
+                                image,
+                                caption=f"{i}: {i // args.num_validation_images}",
+                            )
+                            for i, image in enumerate(upload_images)
+                        ]
+                    }
+                )
+                for i, value in enumerate(fid_scores):
+                    tracker.log({f"fid_{i}": value})
 
 
 def main():
@@ -1077,52 +1115,51 @@ def main():
             if global_step >= args.max_train_steps:
                 break
 
-        if accelerator.is_main_process:
-            if args.run_validation and epoch % args.validation_epochs == 0:
-                logger.info(
-                    f"Running validation... \n Generating {args.num_validation_images} images for each class"
-                )
+        if args.run_validation and epoch % args.validation_epochs == 0:
+            logger.info(
+                f"Running validation... \n Generating {args.num_validation_images} images for each class"
+            )
 
-                pipeline = ClassConditionedStableDiffusionPipeline.from_pretrained(
-                    args.pretrained_model_name_or_path,
-                    torch_dtype=weight_dtype,
-                    scheduler=noise_scheduler,
-                    unet=accelerator.unwrap_model(unet),
-                    vae=vae,
-                    revision=args.revision,
-                )
-                pipeline = pipeline.to(accelerator.device)
-                pipeline.set_progress_bar_config(disable=True)
+            pipeline = ClassConditionedStableDiffusionPipeline.from_pretrained(
+                args.pretrained_model_name_or_path,
+                torch_dtype=weight_dtype,
+                scheduler=noise_scheduler,
+                unet=accelerator.unwrap_model(unet),
+                vae=vae,
+                revision=args.revision,
+            )
+            pipeline = pipeline.to(accelerator.device)
+            pipeline.set_progress_bar_config(disable=True)
 
-                # run inference
-                generator = torch.Generator(device=accelerator.device)
-                if args.seed is not None:
-                    generator = generator.manual_seed(args.seed)
+            # run inference
+            generator = torch.Generator(device=accelerator.device)
+            if args.seed is not None:
+                generator = generator.manual_seed(args.seed)
 
-                # Initialize empty text embeddings
-                encoder_hidden_states = torch.zeros(
-                    [
-                        args.num_validation_images,
-                        encoder_max_position_embeddings,
-                        encoder_hidden_size,
-                    ],
-                    dtype=weight_dtype,
-                ).to(accelerator.device)
+            # Initialize empty text embeddings
+            encoder_hidden_states = torch.zeros(
+                [
+                    args.num_validation_images,
+                    encoder_max_position_embeddings,
+                    encoder_hidden_size,
+                ],
+                dtype=weight_dtype,
+            ).to(accelerator.device)
 
-                run_validation(
-                    args,
-                    pipeline,
-                    accelerator,
-                    encoder_hidden_states_validation,
-                    generator,
-                    epoch,
-                )
+            run_validation(
+                args,
+                pipeline,
+                accelerator,
+                encoder_hidden_states_validation,
+                generator,
+                epoch,
+            )
 
-                del pipeline
-                torch.cuda.empty_cache()
+            del pipeline
+            torch.cuda.empty_cache()
+
         accelerator.wait_for_everyone()
 
-    accelerator.wait_for_everyone()
     # put the latest checkpoint to output-dir
     save_weights(
         global_step,
