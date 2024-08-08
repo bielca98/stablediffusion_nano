@@ -465,32 +465,35 @@ def prepare_trainable_parameters(method, unet, args):
     return unet, trainable_params
 
 
-def upload_training_files(data_dirs, accelerator):
-    for data_dir in data_dirs:
-        images = [
-            Image.open(os.path.join(data_dir, image))
-            for image in os.listdir(data_dir)
-            if image.endswith((".png", ".jpg", ".jpeg"))
-        ]
+def upload_training_files(train_dataloader, accelerator):
+    for i, batch in enumerate(train_dataloader):
+        # Move the image tensor to the CPU and convert it to numpy
+        images = batch["pixel_values"].cpu().numpy()
 
-        for tracker in accelerator.trackers:
-            if tracker.name == "tensorboard":
-                np_images = np.stack([np.asarray(img) for img in images])
-                tracker.writer.add_images(
-                    "training_images", np_images, dataformats="NHWC"
-                )
-            if tracker.name == "wandb":
-                tracker.log(
-                    {
-                        "training_images": [
-                            wandb.Image(
-                                image,
-                                caption=f"{i}",
-                            )
-                            for i, image in enumerate(images)
-                        ]
-                    }
-                )
+        for j, img in enumerate(images):
+            # Reverse the normalization
+            img = ((img * 0.5) + 0.5).transpose(1, 2, 0)
+
+            # Convert the image to an Image object
+            image = Image.fromarray((img * 255).astype("uint8"))
+
+            for tracker in accelerator.trackers:
+                if tracker.name == "tensorboard":
+                    np_images = np.stack([np.asarray(image)])
+                    tracker.writer.add_images(
+                        "training_images", np_images, dataformats="NHWC"
+                    )
+                if tracker.name == "wandb":
+                    tracker.log(
+                        {
+                            "training_images": [
+                                wandb.Image(
+                                    image,
+                                    caption=f"{i * len(images) + j}",
+                                )
+                            ]
+                        }
+                    )
 
 
 def save_images(images, output_dir, start_index):
@@ -907,11 +910,8 @@ def main():
         )
 
     # Upload training images
-    if args.upload_training_images:
-        data_dirs = args.data_dir
-        if not isinstance(args.data_dir, list):
-            data_dirs = [args.data_dir]
-        upload_training_files(data_dirs, accelerator)
+    if args.upload_training_images and accelerator.is_main_process:
+        upload_training_files(train_dataloader, accelerator)
 
     # Train!
     total_batch_size = (
