@@ -1,4 +1,3 @@
-  GNU nano 5.6.1                                                                                                                                                                         train_jeanzay.sh                                                                                                                                                                                   
 #!/bin/bash
 # Usage:
 # ./train_two_classes.sh gpu_list (like 0,1,2 or 0) "data_subfolder1" "data_subfolder2" "method" batch_size (like 128) model_index (0 for nano, 1 for stable-diffusion)
