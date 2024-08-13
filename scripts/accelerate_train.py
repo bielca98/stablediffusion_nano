@@ -144,9 +144,9 @@ def parse_args(input_args=None):
             "lora",
             "svdiff",
             "svdiff_attention",
-            "from_scratch",
             "attention",
             "lora_attention",
+            "from_scratch",
         ],
         help=(
             "Finetunning method that will be used to adapt the model to the new dataset."
@@ -466,6 +466,7 @@ def prepare_trainable_parameters(method, unet, args):
 
 
 def upload_training_files(train_dataloader, accelerator):
+    upload_images = []
     for i, batch in enumerate(train_dataloader):
         # Move the image tensor to the CPU and convert it to numpy
         images = batch["pixel_values"].cpu().numpy()
@@ -476,24 +477,24 @@ def upload_training_files(train_dataloader, accelerator):
 
             # Convert the image to an Image object
             image = Image.fromarray((img * 255).astype("uint8"))
+            upload_images.append(image)
 
-            for tracker in accelerator.trackers:
-                if tracker.name == "tensorboard":
-                    np_images = np.stack([np.asarray(image)])
-                    tracker.writer.add_images(
-                        "training_images", np_images, dataformats="NHWC"
-                    )
-                if tracker.name == "wandb":
-                    tracker.log(
-                        {
-                            "training_images": [
-                                wandb.Image(
-                                    image,
-                                    caption=f"{i * len(images) + j}",
-                                )
-                            ]
-                        }
-                    )
+    for tracker in accelerator.trackers:
+        if tracker.name == "tensorboard":
+            np_images = np.stack([np.asarray(image)])
+            tracker.writer.add_images("training_images", np_images, dataformats="NHWC")
+        if tracker.name == "wandb":
+            tracker.log(
+                {
+                    "training_images": [
+                        wandb.Image(
+                            image,
+                            caption=f"{i}",
+                        )
+                        for i, image in enumerate(upload_images)
+                    ]
+                }
+            )
 
 
 def save_images(images, output_dir, start_index):
