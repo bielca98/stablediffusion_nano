@@ -68,6 +68,11 @@ def parse_args(input_args=None):
         help="Dir where there are the images that will be used for translation.",
     )
     parser.add_argument(
+        "--use_local_checkpoints",
+        action="store_true",
+        help="Whether to use local checkpoints or download them from huggingface.",
+    )
+    parser.add_argument(
         "--output_dir",
         type=str,
         nargs="+",
@@ -175,7 +180,10 @@ def load_model(args):
 
     # Load the VAE
     vae = AutoencoderKL.from_pretrained(
-        args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision
+        args.pretrained_model_name_or_path,
+        subfolder="vae",
+        revision=args.revision,
+        local_files_only=args.use_local_checkpoints,
     )
 
     # Load the UNet configuration
@@ -187,6 +195,7 @@ def load_model(args):
         subfolder="unet",
         method=args.finetunning_method,
         class_conditioning=class_conditioning,
+        is_local_checkpoint=args.use_local_checkpoints,
     )
 
     # Move Unet and Vae to the correspondent device
@@ -214,6 +223,7 @@ def load_model(args):
         args.pretrained_model_name_or_path,
         subfolder="text_encoder",
         revision=args.revision,
+        local_files_only=args.use_local_checkpoints,
     )
     encoder_max_position_embeddings = text_encoder_config.max_position_embeddings
     encoder_hidden_size = text_encoder_config.hidden_size
@@ -244,6 +254,7 @@ def load_model(args):
         subfolder="unet",
         method=args.finetunning_method,
         class_conditioning=class_conditioning,
+        is_local_checkpoint=args.use_local_checkpoints,
     )
 
     # Move Unet to the correspondent device
@@ -537,4 +548,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if accelerator.is_main_process:
+        main()
