@@ -16,8 +16,40 @@ from peft import PeftModel, PeftConfig, get_peft_model
 from safetensors.torch import save_file
 from safetensors.torch import safe_open
 import huggingface_hub
+import numpy as np
 
 logger = get_logger(__name__)
+
+
+def pil_to_tensor(image):
+    """Convert a PIL image to a PyTorch tensor."""
+    image_np = np.array(image)  # Convert PIL image to numpy array
+
+    image_tensor = torch.from_numpy(image_np).permute(2, 0, 1).float()
+
+    # Normalize the tensor values to be between 0 and 1
+    image_tensor /= 255.0
+
+    return image_tensor
+
+
+def tensor_to_pil(tensor):
+    """
+    Convert a normalized tensor back to a PIL image without using torchvision.transforms.
+    """
+    # Unnormalize the tensor: (tensor * std) + mean
+    unnormalized_tensor = tensor * 0.5 + 0.5
+
+    # Convert the tensor to a numpy array
+    numpy_image = unnormalized_tensor.mul(255).byte().cpu().numpy()
+
+    # Move channel to the last dimension if needed
+    numpy_image = numpy_image.transpose(1, 2, 0)
+
+    # Convert numpy array to PIL image
+    pil_image = Image.fromarray(numpy_image)
+
+    return pil_image
 
 
 class DownStreamDataset(Dataset):
