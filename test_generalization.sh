@@ -58,7 +58,6 @@ $CMD scripts/test_generalization.py \
   --pretrained_model_name_or_path=$MODEL_NAME \
   --weights_path=$WEIGHTS_PATH1 \
   --second_weights_path=$WEIGHTS_PATH2 \
-  --output_dir $OUTPUT_DIR1 $OUTPUT_DIR2 \
   --data_dir=$DATA_DIR \
   --dataloader_batch_size=$DATALOADER_BATCH_SIZE \
   --experiment_name=$EXPERIMENT_NAME \

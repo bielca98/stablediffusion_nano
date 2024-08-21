@@ -73,13 +73,6 @@ def parse_args(input_args=None):
         help="Whether to use local checkpoints or download them from huggingface.",
     )
     parser.add_argument(
-        "--output_dir",
-        type=str,
-        nargs="+",
-        default="output",
-        help="The output directory where the generated images will be written.",
-    )
-    parser.add_argument(
         "--num_images_per_class",
         type=int,
         default=20,
@@ -187,14 +180,13 @@ def load_model(args):
     )
 
     # Load the UNet configuration
-    class_conditioning = len(args.output_dir) > 1
     unet = load_unet_custom(
         args.pretrained_model_name_or_path,
         args.weights_path,
         args.revision,
         subfolder="unet",
         method=args.finetunning_method,
-        class_conditioning=class_conditioning,
+        class_conditioning=True,
         is_local_checkpoint=args.use_local_checkpoints,
     )
 
@@ -253,7 +245,7 @@ def load_model(args):
         args.revision,
         subfolder="unet",
         method=args.finetunning_method,
-        class_conditioning=class_conditioning,
+        class_conditioning=True,
         is_local_checkpoint=args.use_local_checkpoints,
     )
 
@@ -476,6 +468,7 @@ def main():
         config={
             "method": args.finetunning_method,
             "n_train_samples": args.data_samples,
+            "class_label": args.class_label,
         },
     )
 
@@ -548,5 +541,4 @@ def main():
 
 
 if __name__ == "__main__":
-    if accelerator.is_main_process:
-        main()
+    main()
