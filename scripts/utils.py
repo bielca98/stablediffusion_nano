@@ -74,6 +74,7 @@ class DownStreamDataset(Dataset):
 
         self.data_root = [Path(root) for root in data_root]
         self.images_paths = []
+
         for root in self.data_root:
             if not root.exists():
                 raise ValueError("Instance images root doesn't exists.")
@@ -287,7 +288,7 @@ def load_unet_custom(
 
     # Add class embeddings
     initialize_class_embeddings = False
-    if class_conditioning and config["num_class_embeds"] is None:
+    if class_conditioning and config.get("num_class_embeds") is None:
         config["num_class_embeds"] = 2
         initialize_class_embeddings = True
 
