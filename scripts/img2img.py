@@ -68,7 +68,15 @@ def parse_args(input_args=None):
         "--finetunning_method",
         type=str,
         default=None,
-        choices=["full", "lora", "svdiff", "from_scratch", "attention", "svdiff_attention", "lora_attention"],
+        choices=[
+            "full",
+            "lora",
+            "svdiff",
+            "from_scratch",
+            "attention",
+            "svdiff_attention",
+            "lora_attention",
+        ],
         help=(
             "Finetunning method that will be used to adapt the model to the new dataset."
         ),
@@ -236,17 +244,8 @@ def main():
     # Calculate the number of batches
     num_batches = len(image_names) // batch_size + (len(image_names) % batch_size != 0)
 
-    # Prepare empty text encoder hidden states
-    encoder_hidden_states = torch.zeros(
-        [
-            batch_size,
-            encoder_max_position_embeddings,
-            encoder_hidden_size,
-        ],
-        dtype=accelerator.unwrap_model(pipeline_inversion.unet).dtype,
-    ).to(accelerator.device)
-
     for i in range(num_batches):
+        print(f"Generating batch {i}")
         batch_images = []
         for j in range(batch_size):
             if i * batch_size + j < len(image_names):
@@ -254,6 +253,16 @@ def main():
                     os.path.join(args.data_dir, image_names[i * batch_size + j])
                 )
                 batch_images.append(image)
+
+        # Prepare empty text encoder hidden states
+        encoder_hidden_states = torch.zeros(
+            [
+                len(batch_images),
+                encoder_max_position_embeddings,
+                encoder_hidden_size,
+            ],
+            dtype=accelerator.unwrap_model(pipeline_inversion.unet).dtype,
+        ).to(accelerator.device)
 
         print(f"Generating images for batch {i}...")
         translated_image_batch = generate_translated_image(

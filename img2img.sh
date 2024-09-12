@@ -1,16 +1,33 @@
 #!/bin/bash
 
-export MODEL_NAME="bguisard/stable-diffusion-nano-2-1"
-#export MODEL_NAME="stabilityai/stable-diffusion-2-1"
-export DATA_DIR="/projects/static2dynamic/Biel/stablediffusion_nano/data/data/train/DMSO_1_100"
-export CLASS_LABEL=0
-export OUTPUT_DIR1="/projects/static2dynamic/Biel/stablediffusion_nano/outputs/delete1"
-export OUTPUT_DIR2="/projects/static2dynamic/Biel/stablediffusion_nano/outputs/delete2"
+# Usage:
+# ./img2img.sh 3 "train/DMSO" 0 "BBBC021" "BBBC021_translated" "2classes_nano_lora_attention_DMSO_latrunculin_B_high_conc" "lora" 512 0
+# Compute fid: metrics_dict=torch_fidelity.calculate_metrics(input1=path1,input2=path2,fid=True,cuda=True)
 
-export WEIGHTS_PATH="/projects/static2dynamic/Biel/stablediffusion_nano/test_output/2classes_nano_attention_DMSO_latrunculin_B_high_conc/checkpoint-2000"
-export METHOD="attention"
+export DATA_SUBFOLDER=${2:-"train/DMSO"}
+export CLASS_LABEL=${3:-0}
+export OUTPUT_SUBFOLDER_ORIGINAL=${4:-"BBBC021"}
+export OUTPUT_SUBFOLDER_TRANSLATED=${5:-"BBBC021_translated"}
+export WEIGHTS_SUBFOLDER=${6:-"2classes_nano_attention_DMSO_latrunculin_B_high_conc"}
+export METHOD=${7:-"lora"}
+export BATCH_SIZE=${8:-64}
+
+MODEL_NAMES=("bguisard/stable-diffusion-nano-2-1" "stabilityai/stable-diffusion-2-1")
+MODEL_INDEX=${9:-0} 
+export MODEL_NAME=${MODEL_NAMES[$MODEL_INDEX]}
 
 export EXPERIMENT_NAME=$(basename $(dirname $WEIGHTS_PATH))
+
+BASE_DATA_DIR="/projects/static2dynamic/Biel/stablediffusion_nano/data/data/"
+export DATA_DIR="${BASE_DATA_DIR}${DATA_SUBFOLDER}"
+
+BASE_OUTPUT_DIR="/projects/static2dynamic/Biel/stablediffusion_nano/outputs/"
+export OUTPUT_DIR1="${BASE_OUTPUT_DIR}${OUTPUT_SUBFOLDER_ORIGINAL}"
+export OUTPUT_DIR2="${BASE_OUTPUT_DIR}${OUTPUT_SUBFOLDER_TRANSLATED}"
+
+
+BASE_WEIGHTS_DIR="/projects/static2dynamic/Biel/stablediffusion_nano/test_output/"
+export WEIGHTS_PATH="${BASE_WEIGHTS_DIR}${WEIGHTS_SUBFOLDER}"
 
 # Check if GPU IDs are provided
 if [ "$#" -eq 0 ]; then
@@ -46,10 +63,9 @@ fi
 $CMD scripts/img2img.py \
   --pretrained_model_name_or_path=$MODEL_NAME \
   --weights_path=$WEIGHTS_PATH \
-  --output_dir $OUTPUT_DIR1 $OUTPUT_DIR2 \
+  --output_dir $OUTPUT_DIR1 $OUTPUT_DIR2\
   --data_dir=$DATA_DIR \
   --experiment_name=$EXPERIMENT_NAME \
   --class_label=$CLASS_LABEL \
-  --upload_images \
-  --num_images_per_class=50 \
+  --num_images_per_class=$BATCH_SIZE \
   --finetunning_method=$METHOD
