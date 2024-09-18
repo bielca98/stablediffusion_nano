@@ -41,14 +41,6 @@ def parse_args(input_args=None):
         help="The checkpoint directory that will be used to load the unet weights.",
     )
     parser.add_argument(
-        "--data_dir",
-        type=str,
-        nargs="+",
-        default=None,
-        required=True,
-        help="A folder containing the training data of instance images.",
-    )
-    parser.add_argument(
         "--output_dir",
         type=str,
         nargs="+",

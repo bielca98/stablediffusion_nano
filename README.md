@@ -1,6 +1,6 @@
 # Image-to-Image Translation and Fine-Tuning with Stable Diffusion 
 
-This project corresponds to a six-month internship conducted at the Institut de Biologie de l’École Normale Supérieure as part of the Master 2 program in Mathematics, Vision, and Learning at ENS Paris-Saclay. The internship was completed in the Computational Bioimaging and Bioinformatics lab, led by Dr. Auguste Genovesio, with guidance from Anis Bourou and Thomas Boyer. The primary focus of the work was on the fine-tuning of conditional diffusion models and their applications in image-to-image translation, specifically for biological images.
+This project corresponds to a six-month internship conducted at the Institut de Biologie de l’École Normale Supérieure as part of the Master 2 program in Mathematics, Vision, and Learning at ENS Paris-Saclay. The internship was completed in the Computational Bioimaging and Bioinformatics lab, led by Dr. Auguste Genovesio, with guidance from Anis Bourou and Thomas Boyer. The primary focus of the work was on the fine-tuning of conditional diffusion models and their applications in image-to-image translation, specifically for biological images. The report of the internship is included in this repository (CASTANO-SEGADE_BIEL_RAPPORT.pdf).
 
 This project builds upon code from the [SVDiff Project](https://github.com/mkshing/svdiff-pytorch) and [Stable Diffusion 2.1](https://github.com/Stability-AI/stable-diffusion). It incorporates our own custom code for fine-tuning pre-trained models on specific datasets using various fine-tuning techniques. 
 
