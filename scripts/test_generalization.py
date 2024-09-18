@@ -320,6 +320,10 @@ def generate_and_find_closest_images_direct(
     generator = torch.Generator(device=device)
     if seed is not None:
         generator.manual_seed(seed)
+    
+    # Save the initial state of the generator
+    initial_state = generator.get_state()
+
 
     # Generate images using the pipeline
     with torch.no_grad():
@@ -331,6 +335,10 @@ def generate_and_find_closest_images_direct(
                 generator=generator,
                 num_images=n_images,
             ).images
+    
+    # Restore the generator state to the saved initial state
+    generator.set_state(initial_state)
+
 
     # Generate images using the second pipeline
     with torch.no_grad():
@@ -499,7 +507,7 @@ def main():
             dataloader=dataloader,
             n_images=args.num_images_per_class,
             encoder_hidden_states=encoder_hidden_states,
-            class_label=0,
+            class_label=args.class_label,
             num_inference_steps=100,
             seed=42,
         )

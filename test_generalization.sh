@@ -1,27 +1,27 @@
 #!/bin/bash
 
 # ./test_generalization.sh gpu_list class_label num_train_images method data_subfolder dataloader_batch_size
-#./test_generalization.sh 0 0 10 svdiff "train/DMSO" 10
+#./test_generalization.sh 0 0 100 lora BBBC021_splits/split1_100/DMSO 100 aug_lora1_lora_DMSO_latrunculin_B_high_conc_100_43 aug_lora2_lora_DMSO_latrunculin_B_high_conc_100_43
 
 export MODEL_NAME="bguisard/stable-diffusion-nano-2-1"
 
 export CLASS_LABEL=${2:0}
 export NUM_TRAIN_IMAGES=${3:-10}
 export METHOD=${4:-"attention"}
-export DATA_SUBFOLDER=${5:-"train/DMSO"}
+export DATA_SUBFOLDER=${5:-"BBBC021_splits/split1_100/DMSO"}
 export DATALOADER_BATCH_SIZE=${6:-10}
+export WEIGHTS_SUBFOLDER1=${7:-"aug_lora1_lora_DMSO_latrunculin_B_high_conc_100_43"}
+export WEIGHTS_SUBFOLDER2=${8:-"aug_lora2_lora_DMSO_latrunculin_B_high_conc_100_43"}
 
 BASE_DATA_DIR="/projects/static2dynamic/Biel/stablediffusion_nano/data/data/"
 export DATA_DIR="${BASE_DATA_DIR}${DATA_SUBFOLDER}"
 
 
-export DATA_SAMPLING_SEED1=43
-export DATA_SAMPLING_SEED2=45
 BASE_WEIGHTS_PATH="/projects/static2dynamic/Biel/stablediffusion_nano/test_output/"
-export WEIGHTS_PATH1="${BASE_WEIGHTS_PATH}2classes_nano_DMSO_latrunculin_B_high_conc_${NUM_TRAIN_IMAGES}_${DATA_SAMPLING_SEED1}"
-export WEIGHTS_PATH2="${BASE_WEIGHTS_PATH}2classes_nano_${METHOD}_DMSO_latrunculin_B_high_conc_${NUM_TRAIN_IMAGES}_${DATA_SAMPLING_SEED2}"
-
-export EXPERIMENT_NAME=$(basename $(dirname $WEIGHTS_PATH1))
+export WEIGHTS_PATH1="${BASE_WEIGHTS_PATH}${WEIGHTS_SUBFOLDER1}"
+export WEIGHTS_PATH2="${BASE_WEIGHTS_PATH}${WEIGHTS_SUBFOLDER2}"
+export EXPERIMENT_NAME="lora_100_1_aug"
+# export EXPERIMENT_NAME="200_NOAUG_DMSO"
 
 # Check if GPU IDs are provided
 if [ "$#" -eq 0 ]; then
@@ -39,7 +39,7 @@ else
 fi
 
 # Construct the base accelerate launch command
-BASE_CMD="accelerate launch --main_process_port 24591"
+BASE_CMD="accelerate launch --main_process_port 24596"
 
 # Add multi_gpu option based on the number of GPUs
 if [ $NUM_PROCESSES -eq 0 ]; then
@@ -64,7 +64,6 @@ $CMD scripts/test_generalization.py \
   --upload_images \
   --resolution=128 \
   --num_images_per_class=100 \
-  --data_sampling_seed=$DATA_SAMPLING_SEED1 \
   --data_samples=$NUM_TRAIN_IMAGES \
   --n_close_images_to_upload=10 \
   --finetunning_method=$METHOD
