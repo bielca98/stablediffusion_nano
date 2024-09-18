@@ -1,8 +1,24 @@
 #!/bin/bash
 
-# Usage:
-# ./img_generation.sh 3 "generated_images_100_noaug/DMSO" "generated_images_100_noaug/latrunculin_B_high_conc" "checkpoints_jeanzay/svdiff_100_split1" "lora" 200 1600
-# To compute fid: metrics_dict=torch_fidelity.calculate_metrics(input1=path1,input2=path2,fid=True,cuda=True)
+# Script to generate and store images using a pre-trained model and specified method. # This script allows for the generation of images and saving them in designated output folders. 
+# 
+# Usage: 
+# ./img_generation.sh <num_processes> <output_subfolder1> <output_subfolder2> <weights_subfolder> <method> <batch_size> <num_img_per_class> 
+# 
+# Parameters: 
+# 1. <num_processes>: Number of processes to run in parallel (e.g., 3). 
+# 2. <output_subfolder1>: Folder to store generated images for the first class (e.g., "generated_images_100_noaug/DMSO"). 
+# 3. <output_subfolder2>: Folder to store generated images for the second class (e.g., "generated_images_100_noaug/latrunculin_B_high_conc"). 
+# 4. <weights_subfolder>: Subfolder containing model weights (e.g., "checkpoints_jeanzay/svdiff_100_split1"). 
+# 5. <method>: Training method to use for generation (e.g., "lora").  Possible elections: "full", "lora", "svdiff", "svdiff_attention", "attention",  "lora_attention", "from_scratch"
+# 6. <batch_size>: Batch size for generating images (e.g., 200). 
+# 7. <num_img_per_class>: Number of images to generate per class (e.g., 1600). 
+# 
+# Example Command: 
+# ./img_generation.sh 3 "generated_images_100_noaug/DMSO" "generated_images_100_noaug/latrunculin_B_high_conc" "checkpoints_jeanzay/svdiff_100_split1" "lora" 200 1600 
+# 
+# To compute FID (Frechet Inception Distance) for image quality: 
+# metrics_dict = torch_fidelity.calculate_metrics(input1=path1, input2=path2, fid=True, cuda=True)
 
 export OUTPUT_SUBFOLDER1=${2:-"generated_images_100_noaug/DMSO"}
 export OUTPUT_SUBFOLDER2=${3:-"generated_images_100_noaug/latrunculin_B_high_conc"}

@@ -1,21 +1,37 @@
 #!/bin/bash
-# Usage:
-# ./train.sh gpu_list (like 0,1,2 or 0) "data_subfolder" "method" batch_size (like 128) model_index (0 for nano, 1 for stable-diffusion)
-# ./train.sh 0 "train/DMSO" "attention" 64 0
+# Script to train a model using specified GPUs, a data subfolder, and a training method. 
+# The script allows for flexible GPU assignment, batch sizes, methods, and model selection. 
+# 
+# Usage: 
+# ./train.sh <gpu_list> <data_subfolder> <method> <batch_size> <data_samples> <data_sampling_seed> <model_index> 
+# 
+# Parameters: 
+# 1. <gpu_list>: Comma-separated list of GPU IDs to use (e.g., "0", "0,1,2"). 
+# 2. <data_subfolder>: Path to the data subfolder (e.g., "train/DMSO"). 
+# 3. <method>: Training method to use for generation (e.g., "lora").  Possible elections: "full", "lora", "svdiff", "svdiff_attention", "attention",  "lora_attention", "from_scratch"
+# 4. <batch_size>: Batch size for training (e.g., 128). 
+# 5. <data_samples>: Number of data samples (e.g., 10). 
+# 6. <data_sampling_seed>: Random seed for data sampling (e.g., 43). 
+# 7. <model_index>: Index for selecting the model (0 for "base", 1 for "stable-diffusion"). 
+# 
+# Example Command: 
+# ./train.sh 0,1,2,3 "org_c2/train/unified" "lora" 20 208 43 0 
 
 export DATA_SUBFOLDER=${2:-"train/DMSO"}
 export METHOD=${3:-"attention"}
 export BATCH_SIZE=${4:-64}
+export DATA_SAMPLES=${5:-10}
+export DATA_SAMPLING_SEED=${6:-43}
 
-MODEL_NAMES=("bguisard/stable-diffusion-nano-2-1" "stabilityai/stable-diffusion-2-1")
-MODEL_INDEX=${5:-0} 
+MODEL_NAMES=("stabilityai/stable-diffusion-2-base" "stabilityai/stable-diffusion-2-1")
+MODEL_INDEX=${7:-0} 
 export MODEL_NAME=${MODEL_NAMES[$MODEL_INDEX]}
 
 # To remove intermediate folders
 BASE_FOLDER_NAME=$(basename $DATA_SUBFOLDER)
 
 MODEL_TYPE=$(echo $MODEL_NAME | cut -d'/' -f2 | cut -d'-' -f3)
-export EXPERIMENT_NAME="${MODEL_TYPE}_${METHOD}_${BASE_FOLDER_NAME}"
+export EXPERIMENT_NAME="${MODEL_TYPE}_${METHOD}_${BASE_FOLDER_NAME}_${DATA_SAMPLES}_${DATA_SAMPLING_SEED}"
 
 BASE_DATA_DIR="/projects/static2dynamic/Biel/stablediffusion_nano/data/data/"
 export DATA_DIR="${BASE_DATA_DIR}${DATA_SUBFOLDER}"
@@ -58,17 +74,19 @@ $CMD scripts/accelerate_train.py \
   --pretrained_model_name_or_path=$MODEL_NAME  \
   --data_dir=$DATA_DIR\
   --output_dir=$OUTPUT_DIR \
-  --resolution=128 \
+  --resolution=512 \
   --train_batch_size=$BATCH_SIZE \
   --gradient_accumulation_steps=1 \
   --learning_rate=1e-3 \
   --lr_scheduler="cosine" \
   --lr_warmup_steps=0 \
   --report_to="wandb" \
-  --checkpointing_steps=10 \
-  --validation_epochs=1 \
-  --num_validation_images=64 \
+  --validation_epochs=50 \
+  --num_validation_images=32 \
   --num_inference_steps=100 \
   --experiment_name=$EXPERIMENT_NAME \
-  --num_train_epochs=200 \
+  --validation_batch_size=16 \
+  --data_sampling_seed=$DATA_SAMPLING_SEED \
+  --data_samples=$DATA_SAMPLES \
+  --max_train_steps=100000 \
   --finetunning_method=$METHOD

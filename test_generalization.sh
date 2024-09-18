@@ -1,7 +1,21 @@
 #!/bin/bash
-
-# ./test_generalization.sh gpu_list class_label num_train_images method data_subfolder dataloader_batch_size
-#./test_generalization.sh 0 0 100 lora BBBC021_splits/split1_100/DMSO 100 aug_lora1_lora_DMSO_latrunculin_B_high_conc_100_43 aug_lora2_lora_DMSO_latrunculin_B_high_conc_100_43
+# Script to test model generalization (with histograms and finding closest image) using specified GPU, class label, training images, and method. 
+# 
+# Usage: 
+# ./test_generalization.sh <gpu_list> <class_label> <num_train_images> <method> <data_subfolder> <dataloader_batch_size> <weights_subfolder1> <weights_subfolder2> 
+# 
+# Parameters: 
+# 1. <gpu_list>: Comma-separated list of GPU IDs to use (e.g., "0"). 
+# 2. <class_label>: Label for the class to test (e.g., 0 for class 0). 
+# 3. <num_train_images>: Number of training images to use (e.g., 100). 
+# 4. <method>: Training method to use for generation (e.g., "lora").  Possible elections: "full", "lora", "svdiff", "svdiff_attention", "attention",  "lora_attention", "from_scratch"
+# 5. <data_subfolder>: Path to the data subfolder (e.g., "BBBC021_splits/split1_100/DMSO"). 
+# 6. <dataloader_batch_size>: Batch size for the dataloader (e.g., 100). 
+# 7. <weights_subfolder1>: First subfolder for model weights (e.g., "aug_lora1_lora_DMSO_latrunculin_B_high_conc_100_43"). 
+# 8. <weights_subfolder2>: Second subfolder for model weights (e.g., "aug_lora2_lora_DMSO_latrunculin_B_high_conc_100_43"). 
+# 
+# Example Command: 
+# ./test_generalization.sh 0 0 100 lora BBBC021_splits/split1_100/DMSO 100 aug_lora1_lora_DMSO_latrunculin_B_high_conc_100_43 aug_lora2_lora_DMSO_latrunculin_B_high_conc_100_43
 
 export MODEL_NAME="bguisard/stable-diffusion-nano-2-1"
 

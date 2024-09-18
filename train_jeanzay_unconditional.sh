@@ -1,7 +1,18 @@
 #!/bin/bash
-# Usage:
-# ./train_two_classes.sh gpu_list (like 0,1,2 or 0) "data_subfolder1" "data_subfolder2" "method" batch_size (like 128) model_index (0 for nano, 1 for stable-diffusion)
-# ./train_two_classes.sh 2 "train/DMSO" "train/latrunculin_B_high_conc" "attention" 64 10 43 0
+# Script to train a model using multiple processes and GPUs, with a specified data folder, method, and batch size. 
+# 
+# Usage: 
+# ./train_two_classes.sh <num_processes> <data_subfolder> <method> <batch_size> <data_samples> 
+# 
+# Parameters: 
+# 1. <num_processes>: Number of processes to run in parallel (e.g., 2). 
+# 2. <data_subfolder>: Path to the data subfolder (e.g., "train/DMSO"). 
+# 3. <method>: Training method to use for generation (e.g., "lora").  Possible elections: "full", "lora", "svdiff", "svdiff_attention", "attention",  "lora_attention", "from_scratch"
+# 4. <batch_size>: Batch size for training (e.g., 128). 
+# 5. <data_samples>: Number of data samples (e.g., 10). 
+# 
+# Example Command: 
+# ./train_two_classes.sh 2 "train/DMSO" "attention" 64 10
 
 export NUM_PROCESSES=${1:-2}
 export DATA_SUBFOLDER=${2:-"train/DMSO"}
